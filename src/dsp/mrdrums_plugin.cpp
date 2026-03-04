@@ -409,6 +409,19 @@ static const char *vel_curve_to_string(int vel_curve) {
     }
 }
 
+static int ui_note_to_pad(int note) {
+    /* Primary mapping from requirements */
+    int pad = mrdrums_engine_note_to_pad(note);
+    if (pad > 0) return pad;
+
+    /* Internal Move pad range fallback */
+    if (note >= 68 && note <= 83) {
+        return note - 68 + 1;
+    }
+
+    return 0;
+}
+
 static int set_param_value(mrdrums_instance_t *inst, const char *key, const char *val) {
     if (!inst || !key || !val) return 0;
 
@@ -656,6 +669,10 @@ static void v2_on_midi(void *instance, const uint8_t *msg, int len, int source) 
 
     if (status == 0x90) {
         if (data2 > 0) {
+            int ui_pad = ui_note_to_pad((int)data1);
+            if (ui_pad > 0) {
+                inst->ui_current_pad = ui_pad;
+            }
             mrdrums_engine_note_on(&inst->engine, (int)data1, (int)data2);
         } else {
             mrdrums_engine_note_off(&inst->engine, (int)data1);
@@ -825,31 +842,80 @@ static int build_chain_params_json(char *buf, int buf_len) {
     return (offset < buf_len) ? offset : -1;
 }
 
-static int build_ui_hierarchy(char *buf, int buf_len) {
-    const char *hier = "{"
-        "\"levels\":{"
-            "\"root\":{"
-                "\"name\":\"mrdrums\"," 
-                "\"params\":["
-                    "{\"label\":\"Global\",\"level\":\"global\"},"
-                    "{\"label\":\"Pad Settings\",\"level\":\"pad_settings\"}"
-                "]"
-            "},"
-            "\"global\":{"
-                "\"name\":\"Global\","
-                "\"params\":[\"g_master_vol\",\"g_polyphony\",\"g_vel_curve\",\"g_humanize_ms\",\"g_rand_seed\",\"g_rand_loop_steps\"]"
-            "},"
-            "\"pad_settings\":{" 
-                "\"name\":\"Pad Settings\","
-                "\"params\":[\"ui_current_pad\",\"p01_sample_path\",\"p01_vol\",\"p01_pan\",\"p01_tune\",\"p01_start\",\"p01_attack_ms\",\"p01_decay_ms\",\"p01_choke_group\",\"p01_mode\",\"p01_rand_pan_amt\",\"p01_rand_vol_amt\",\"p01_rand_decay_amt\",\"p01_chance_pct\"]"
-            "}"
-        "}"
-    "}";
+static int build_ui_hierarchy(mrdrums_instance_t *inst, char *buf, int buf_len) {
+    if (!buf || buf_len <= 0) return -1;
 
-    int n = (int)strlen(hier);
-    if (n >= buf_len) return -1;
-    memcpy(buf, hier, (size_t)n + 1);
-    return n;
+    int pad = 1;
+    if (inst) {
+        pad = clampi(inst->ui_current_pad, 1, 16);
+    }
+
+    char k_sample_path[32];
+    char k_vol[32];
+    char k_pan[32];
+    char k_tune[32];
+    char k_start[32];
+    char k_attack[32];
+    char k_decay[32];
+    char k_choke[32];
+    char k_mode[32];
+    char k_rand_pan[32];
+    char k_rand_vol[32];
+    char k_rand_decay[32];
+    char k_chance[32];
+
+    if (!mrdrums_make_pad_key(pad, "sample_path", k_sample_path, sizeof(k_sample_path))) return -1;
+    if (!mrdrums_make_pad_key(pad, "vol", k_vol, sizeof(k_vol))) return -1;
+    if (!mrdrums_make_pad_key(pad, "pan", k_pan, sizeof(k_pan))) return -1;
+    if (!mrdrums_make_pad_key(pad, "tune", k_tune, sizeof(k_tune))) return -1;
+    if (!mrdrums_make_pad_key(pad, "start", k_start, sizeof(k_start))) return -1;
+    if (!mrdrums_make_pad_key(pad, "attack_ms", k_attack, sizeof(k_attack))) return -1;
+    if (!mrdrums_make_pad_key(pad, "decay_ms", k_decay, sizeof(k_decay))) return -1;
+    if (!mrdrums_make_pad_key(pad, "choke_group", k_choke, sizeof(k_choke))) return -1;
+    if (!mrdrums_make_pad_key(pad, "mode", k_mode, sizeof(k_mode))) return -1;
+    if (!mrdrums_make_pad_key(pad, "rand_pan_amt", k_rand_pan, sizeof(k_rand_pan))) return -1;
+    if (!mrdrums_make_pad_key(pad, "rand_vol_amt", k_rand_vol, sizeof(k_rand_vol))) return -1;
+    if (!mrdrums_make_pad_key(pad, "rand_decay_amt", k_rand_decay, sizeof(k_rand_decay))) return -1;
+    if (!mrdrums_make_pad_key(pad, "chance_pct", k_chance, sizeof(k_chance))) return -1;
+
+    int n = snprintf(
+        buf,
+        (size_t)buf_len,
+        "{"
+            "\"levels\":{"
+                "\"root\":{"
+                    "\"name\":\"mrdrums\","
+                    "\"params\":["
+                        "{\"label\":\"Global\",\"level\":\"global\"},"
+                        "{\"label\":\"Pad Settings\",\"level\":\"pad_settings\"}"
+                    "]"
+                "},"
+                "\"global\":{"
+                    "\"name\":\"Global\","
+                    "\"params\":[\"g_master_vol\",\"g_polyphony\",\"g_vel_curve\",\"g_humanize_ms\",\"g_rand_seed\",\"g_rand_loop_steps\"]"
+                "},"
+                "\"pad_settings\":{"
+                    "\"name\":\"Pad Settings\","
+                    "\"params\":[\"ui_current_pad\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"]"
+                "}"
+            "}"
+        "}",
+        k_sample_path,
+        k_vol,
+        k_pan,
+        k_tune,
+        k_start,
+        k_attack,
+        k_decay,
+        k_choke,
+        k_mode,
+        k_rand_pan,
+        k_rand_vol,
+        k_rand_decay,
+        k_chance
+    );
+
+    return (n >= 0 && n < buf_len) ? n : -1;
 }
 
 static int v2_get_param(void *instance, const char *key, char *buf, int buf_len) {
@@ -859,7 +925,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (strcmp(key, "name") == 0) return snprintf(buf, buf_len, "mrdrums");
     if (strcmp(key, "state") == 0) return build_state_json(inst, buf, buf_len);
     if (strcmp(key, "chain_params") == 0) return build_chain_params_json(buf, buf_len);
-    if (strcmp(key, "ui_hierarchy") == 0) return build_ui_hierarchy(buf, buf_len);
+    if (strcmp(key, "ui_hierarchy") == 0) return build_ui_hierarchy(inst, buf, buf_len);
 
     return get_param_value(inst, key, buf, buf_len);
 }

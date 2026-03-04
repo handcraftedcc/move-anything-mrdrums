@@ -2,6 +2,8 @@
 
 const PAD_NOTE_MIN = 36;
 const PAD_NOTE_MAX = 51;
+const PAD_NOTE_FALLBACK_MIN = 68;
+const PAD_NOTE_FALLBACK_MAX = 83;
 
 const PAGES = {
     GLOBAL: 0,
@@ -73,6 +75,16 @@ function setParamRaw(key, value) {
     host_module_set_param(key, String(value));
 }
 
+function noteToPad(note) {
+    if (note >= PAD_NOTE_MIN && note <= PAD_NOTE_MAX) {
+        return note - PAD_NOTE_MIN + 1;
+    }
+    if (note >= PAD_NOTE_FALLBACK_MIN && note <= PAD_NOTE_FALLBACK_MAX) {
+        return note - PAD_NOTE_FALLBACK_MIN + 1;
+    }
+    return 0;
+}
+
 function activePadKey(suffix) {
     return `p${String(state.currentPad).padStart(2, '0')}_${suffix}`;
 }
@@ -140,9 +152,9 @@ function adjustControl(control, key, delta) {
 
 function applyPadNoteSelection(note) {
     if (state.page !== PAGES.PAD_SETTINGS) return false;
-    if (note < PAD_NOTE_MIN || note > PAD_NOTE_MAX) return false;
+    const pad = noteToPad(note);
+    if (pad <= 0) return false;
 
-    const pad = note - PAD_NOTE_MIN + 1;
     state.currentPad = pad;
     setParamRaw('ui_current_pad', pad);
     state.needsRedraw = true;
@@ -240,9 +252,7 @@ function onMidiMessageCommon(data) {
     const d2 = data[2];
 
     if (status === 0x90 && d2 > 0) {
-        if (d1 >= PAD_NOTE_MIN && d1 <= PAD_NOTE_MAX) {
-            if (applyPadNoteSelection(d1)) return;
-        }
+        if (applyPadNoteSelection(d1)) return;
 
         if (d1 === 23) {
             switchPage();
@@ -278,6 +288,15 @@ globalThis.init = function init() {
 };
 
 globalThis.tick = function tick() {
+    const paramPad = parseInt(getParamRaw('ui_current_pad') || String(state.currentPad), 10);
+    if (Number.isFinite(paramPad)) {
+        const clamped = clamp(paramPad, 1, 16);
+        if (clamped !== state.currentPad) {
+            state.currentPad = clamped;
+            state.needsRedraw = true;
+        }
+    }
+
     if (!state.needsRedraw) return;
     redraw();
     state.needsRedraw = false;
