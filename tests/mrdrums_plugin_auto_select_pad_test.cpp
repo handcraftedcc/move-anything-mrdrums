@@ -49,6 +49,20 @@ static int expect_int(plugin_api_v2_t *api, void *inst, const char *key, int exp
     return 0;
 }
 
+static int expect_str(plugin_api_v2_t *api, void *inst, const char *key, const char *expected) {
+    char buf[64];
+    std::memset(buf, 0, sizeof(buf));
+    if (api->get_param(inst, key, buf, (int)sizeof(buf)) < 0) {
+        std::fprintf(stderr, "FAIL: get_param(%s) failed\n", key);
+        return 1;
+    }
+    if (std::strcmp(buf, expected) != 0) {
+        std::fprintf(stderr, "FAIL: %s expected %s got %s\n", key, expected, buf);
+        return 1;
+    }
+    return 0;
+}
+
 int main() {
     plugin_api_v2_t *api = move_plugin_init_v2(NULL);
     if (!api || !api->create_instance || !api->destroy_instance || !api->set_param || !api->get_param || !api->on_midi) {
@@ -60,6 +74,10 @@ int main() {
 
     api->set_param(inst, "ui_current_pad", "1");
     api->set_param(inst, "ui_auto_select_pad", "0");
+    if (expect_str(api, inst, "ui_auto_select_pad", "off") != 0) {
+        api->destroy_instance(inst);
+        return 1;
+    }
 
     const unsigned char note_on_pad5[3] = {0x90, 40, 110};  // note 40 => pad 5
     api->on_midi(inst, note_on_pad5, 3, 0);
@@ -69,6 +87,10 @@ int main() {
     }
 
     api->set_param(inst, "ui_auto_select_pad", "1");
+    if (expect_str(api, inst, "ui_auto_select_pad", "on") != 0) {
+        api->destroy_instance(inst);
+        return 1;
+    }
     const unsigned char note_on_pad7[3] = {0x90, 42, 110};  // note 42 => pad 7
     api->on_midi(inst, note_on_pad7, 3, 0);
     if (expect_int(api, inst, "ui_current_pad", 7) != 0) {

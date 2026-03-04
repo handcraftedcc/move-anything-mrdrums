@@ -400,6 +400,17 @@ static const char *mode_to_string(int mode) {
     return (mode == MRDRUMS_PAD_MODE_GATE) ? "gate" : "oneshot";
 }
 
+static int parse_on_off(const char *val) {
+    if (!val) return 0;
+    if (strcasecmp(val, "on") == 0 || strcmp(val, "1") == 0 || strcasecmp(val, "true") == 0) return 1;
+    if (strcasecmp(val, "off") == 0 || strcmp(val, "0") == 0 || strcasecmp(val, "false") == 0) return 0;
+    return atoi(val) != 0 ? 1 : 0;
+}
+
+static const char *on_off_to_string(int value) {
+    return value ? "on" : "off";
+}
+
 static int parse_vel_curve(const char *val) {
     if (!val) return 0;
     if (strcasecmp(val, "soft") == 0 || strcmp(val, "1") == 0) return 1;
@@ -490,7 +501,7 @@ static int set_param_value(mrdrums_instance_t *inst, const char *key, const char
         return 1;
     }
     if (strcmp(key, "ui_auto_select_pad") == 0) {
-        inst->ui_auto_select_pad = clampi(atoi(val), 0, 1);
+        inst->ui_auto_select_pad = parse_on_off(val);
         return 1;
     }
     if (strcmp(key, "ui_current_pad") == 0) {
@@ -580,7 +591,7 @@ static int get_param_value(mrdrums_instance_t *inst, const char *key, char *buf,
     if (strcmp(key, "g_humanize_ms") == 0) return snprintf(buf, buf_len, "%.4f", inst->engine.humanize_ms);
     if (strcmp(key, "g_rand_seed") == 0) return snprintf(buf, buf_len, "%u", inst->engine.rand_seed);
     if (strcmp(key, "g_rand_loop_steps") == 0) return snprintf(buf, buf_len, "%d", inst->engine.rand_loop_steps);
-    if (strcmp(key, "ui_auto_select_pad") == 0) return snprintf(buf, buf_len, "%d", inst->ui_auto_select_pad);
+    if (strcmp(key, "ui_auto_select_pad") == 0) return snprintf(buf, buf_len, "%s", on_off_to_string(inst->ui_auto_select_pad));
     if (strcmp(key, "ui_current_pad") == 0) return snprintf(buf, buf_len, "%d", inst->ui_current_pad);
     if (strcmp(key, "ui_last_sample_dir") == 0) return snprintf(buf, buf_len, "%s", inst->ui_last_sample_dir);
 
@@ -659,7 +670,19 @@ static void apply_state_json(mrdrums_instance_t *inst, const char *json) {
     int global_count = 0;
     const mrdrums_param_desc_t *globals = mrdrums_global_params(&global_count);
     for (int i = 0; i < global_count; i++) {
-        if (strcmp(globals[i].type, "enum") == 0 || strcmp(globals[i].type, "filepath") == 0) {
+        if (strcmp(globals[i].type, "enum") == 0) {
+            char str_value[512];
+            if (json_get_string(json, globals[i].key, str_value, sizeof(str_value)) == 0) {
+                set_param_value(inst, globals[i].key, str_value);
+            } else {
+                float num_value;
+                if (json_get_number(json, globals[i].key, &num_value) == 0) {
+                    char num_buf[64];
+                    snprintf(num_buf, sizeof(num_buf), "%.6g", num_value);
+                    set_param_value(inst, globals[i].key, num_buf);
+                }
+            }
+        } else if (strcmp(globals[i].type, "filepath") == 0) {
             char str_value[512];
             if (json_get_string(json, globals[i].key, str_value, sizeof(str_value)) == 0) {
                 set_param_value(inst, globals[i].key, str_value);
@@ -681,7 +704,19 @@ static void apply_state_json(mrdrums_instance_t *inst, const char *json) {
             char key[64];
             if (!mrdrums_make_pad_key(pad, fields[fi].suffix, key, sizeof(key))) continue;
 
-            if (strcmp(fields[fi].type, "enum") == 0 || strcmp(fields[fi].type, "filepath") == 0) {
+            if (strcmp(fields[fi].type, "enum") == 0) {
+                char str_value[512];
+                if (json_get_string(json, key, str_value, sizeof(str_value)) == 0) {
+                    set_param_value(inst, key, str_value);
+                } else {
+                    float num_value;
+                    if (json_get_number(json, key, &num_value) == 0) {
+                        char num_buf[64];
+                        snprintf(num_buf, sizeof(num_buf), "%.6g", num_value);
+                        set_param_value(inst, key, num_buf);
+                    }
+                }
+            } else if (strcmp(fields[fi].type, "filepath") == 0) {
                 char str_value[512];
                 if (json_get_string(json, key, str_value, sizeof(str_value)) == 0) {
                     set_param_value(inst, key, str_value);
@@ -888,7 +923,7 @@ static int build_chain_params_json(mrdrums_instance_t *inst, char *buf, int buf_
                 : (f->start_path ? f->start_path : "/data/UserData/UserLibrary/Samples");
             if (effective_start_path && effective_start_path[0]) {
                 offset += snprintf(buf + offset, buf_len - offset,
-                                   "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"start_path\":\"%s\",\"filter\":\"%s\"}",
+                                   "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"start_path\":\"%s\",\"filter\":\"%s\",\"live_preview\":true,\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}}",
                                    key,
                                    f->name,
                                    f->root ? f->root : "/data/UserData/UserLibrary/Samples",
@@ -896,7 +931,7 @@ static int build_chain_params_json(mrdrums_instance_t *inst, char *buf, int buf_
                                    f->filter ? f->filter : ".wav");
             } else {
                 offset += snprintf(buf + offset, buf_len - offset,
-                                   "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"filter\":\"%s\"}",
+                                   "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"filter\":\"%s\",\"live_preview\":true,\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}}",
                                    key,
                                    f->name,
                                    f->root ? f->root : "/data/UserData/UserLibrary/Samples",
@@ -940,7 +975,7 @@ static int build_chain_params_json(mrdrums_instance_t *inst, char *buf, int buf_
                     : (f->start_path ? f->start_path : "/data/UserData/UserLibrary/Samples");
                 if (effective_start_path && effective_start_path[0]) {
                     offset += snprintf(buf + offset, buf_len - offset,
-                                       "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"start_path\":\"%s\",\"filter\":\"%s\"}",
+                                       "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"start_path\":\"%s\",\"filter\":\"%s\",\"live_preview\":true,\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}}",
                                        key,
                                        name,
                                        f->root ? f->root : "/data/UserData/UserLibrary/Samples",
@@ -948,7 +983,7 @@ static int build_chain_params_json(mrdrums_instance_t *inst, char *buf, int buf_
                                        f->filter ? f->filter : ".wav");
                 } else {
                     offset += snprintf(buf + offset, buf_len - offset,
-                                       "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"filter\":\"%s\"}",
+                                       "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"filter\":\"%s\",\"live_preview\":true,\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}}",
                                        key,
                                        name,
                                        f->root ? f->root : "/data/UserData/UserLibrary/Samples",
@@ -995,7 +1030,7 @@ static int build_ui_hierarchy(mrdrums_instance_t *inst, char *buf, int buf_len) 
                         "{\"label\":\"Global\",\"level\":\"global\"},"
                         "{\"label\":\"Pad Settings\",\"level\":\"pad_settings\"}"
                     "],"
-                    "\"knobs\":[\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\"]"
+                    "\"knobs\":[\"ui_auto_select_pad\",\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\"]"
                 "},"
                 "\"global\":{"
                     "\"name\":\"Global\","
@@ -1005,7 +1040,7 @@ static int build_ui_hierarchy(mrdrums_instance_t *inst, char *buf, int buf_len) 
                 "\"pad_settings\":{"
                     "\"name\":\"Pad Settings\","
                     "\"params\":[\"ui_auto_select_pad\",\"ui_current_pad\",\"pad_sample_path\",\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\",\"pad_rand_pan_amt\",\"pad_rand_vol_amt\",\"pad_rand_decay_amt\",\"pad_chance_pct\"],"
-                    "\"knobs\":[\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\"]"
+                    "\"knobs\":[\"ui_auto_select_pad\",\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\"]"
                 "}"
             "}"
         "}"

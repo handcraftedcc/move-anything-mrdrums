@@ -65,6 +65,14 @@ int main() {
         api->destroy_instance(inst);
         return fail("filepath start_path metadata missing");
     }
+    if (!std::strstr(chain_params, "\"live_preview\":true")) {
+        api->destroy_instance(inst);
+        return fail("filepath live_preview metadata missing");
+    }
+    if (!std::strstr(chain_params, "\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}")) {
+        api->destroy_instance(inst);
+        return fail("filepath browser_hooks metadata missing");
+    }
 
     api->set_param(inst, "ui_last_sample_dir", "/data/UserData/UserLibrary/Samples/Drums/Kicks/Kick07.wav");
     std::memset(chain_params, 0, sizeof(chain_params));
@@ -76,6 +84,14 @@ int main() {
     if (!std::strstr(chain_params, "\"start_path\":\"/data/UserData/UserLibrary/Samples/Drums/Kicks/Kick07.wav\"")) {
         api->destroy_instance(inst);
         return fail("filepath start_path did not follow ui_last_sample_dir");
+    }
+    if (!std::strstr(chain_params, "\"live_preview\":true")) {
+        api->destroy_instance(inst);
+        return fail("filepath live_preview metadata missing after ui_last_sample_dir");
+    }
+    if (!std::strstr(chain_params, "\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}")) {
+        api->destroy_instance(inst);
+        return fail("filepath browser_hooks metadata missing after ui_last_sample_dir");
     }
 
     api->destroy_instance(inst);

@@ -21,6 +21,12 @@ int main() {
 
     const mrdrums_param_desc_t *global = mrdrums_find_global_param("g_master_vol");
     if (!global) return fail("missing g_master_vol descriptor");
+    const mrdrums_param_desc_t *auto_select = mrdrums_find_global_param("ui_auto_select_pad");
+    if (!auto_select) return fail("missing ui_auto_select_pad descriptor");
+    if (std::strcmp(auto_select->type, "enum") != 0) return fail("ui_auto_select_pad type expected enum");
+    if (!auto_select->options_json || std::strcmp(auto_select->options_json, "[\"off\",\"on\"]") != 0) {
+        return fail("ui_auto_select_pad options expected [\"off\",\"on\"]");
+    }
 
     const mrdrums_param_desc_t *pad = mrdrums_find_pad_param("p07_tune");
     if (!pad) return fail("missing p07_tune descriptor");

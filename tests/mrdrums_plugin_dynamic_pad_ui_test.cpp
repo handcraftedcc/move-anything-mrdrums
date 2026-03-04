@@ -77,7 +77,7 @@ int main() {
         api->destroy_instance(inst);
         return 1;
     }
-    if (expect_ui_hierarchy_contains(api, inst, "\"root\":{\"name\":\"mrdrums\",\"params\":[{\"label\":\"Global\",\"level\":\"global\"},{\"label\":\"Pad Settings\",\"level\":\"pad_settings\"}],\"knobs\":[\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\"]}") != 0) {
+    if (expect_ui_hierarchy_contains(api, inst, "\"root\":{\"name\":\"mrdrums\",\"params\":[{\"label\":\"Global\",\"level\":\"global\"},{\"label\":\"Pad Settings\",\"level\":\"pad_settings\"}],\"knobs\":[\"ui_auto_select_pad\",\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\"]}") != 0) {
         api->destroy_instance(inst);
         return 1;
     }
@@ -85,7 +85,7 @@ int main() {
         api->destroy_instance(inst);
         return 1;
     }
-    if (expect_ui_hierarchy_contains(api, inst, "\"knobs\":[\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\"]") != 0) {
+    if (expect_ui_hierarchy_contains(api, inst, "\"knobs\":[\"ui_auto_select_pad\",\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\"]") != 0) {
         api->destroy_instance(inst);
         return 1;
     }
