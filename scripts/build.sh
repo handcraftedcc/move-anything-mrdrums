@@ -58,6 +58,7 @@ echo "Packaging..."
 cat src/module.json > "$MODULE_DIR/module.json"
 cat build/dsp.so > "$MODULE_DIR/dsp.so"
 chmod +x "$MODULE_DIR/dsp.so"
+cat src/ui.js > "$MODULE_DIR/ui.js"
 cat README.md > "$MODULE_DIR/README.md"
 cat src/help.json > "$MODULE_DIR/help.json"
 
