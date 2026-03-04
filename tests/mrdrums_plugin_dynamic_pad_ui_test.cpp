@@ -56,7 +56,7 @@ int main() {
     if (!inst) return fail("create_instance failed");
 
     api->set_param(inst, "ui_current_pad", "6");
-    if (expect_ui_pad_key(api, inst, "p06_pan") != 0) {
+    if (expect_ui_pad_key(api, inst, "pad_pan") != 0) {
         api->destroy_instance(inst);
         return 1;
     }
@@ -76,7 +76,7 @@ int main() {
         return 1;
     }
 
-    if (expect_ui_pad_key(api, inst, "p09_pan") != 0) {
+    if (expect_ui_pad_key(api, inst, "pad_pan") != 0) {
         api->destroy_instance(inst);
         return 1;
     }

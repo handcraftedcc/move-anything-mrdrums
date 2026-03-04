@@ -409,6 +409,37 @@ static const char *vel_curve_to_string(int vel_curve) {
     }
 }
 
+typedef struct {
+    const char *alias_key;
+    const char *suffix;
+} current_pad_alias_t;
+
+static const current_pad_alias_t kCurrentPadAliases[] = {
+    {"pad_sample_path", "sample_path"},
+    {"pad_vol", "vol"},
+    {"pad_pan", "pan"},
+    {"pad_tune", "tune"},
+    {"pad_start", "start"},
+    {"pad_attack_ms", "attack_ms"},
+    {"pad_decay_ms", "decay_ms"},
+    {"pad_choke_group", "choke_group"},
+    {"pad_mode", "mode"},
+    {"pad_rand_pan_amt", "rand_pan_amt"},
+    {"pad_rand_vol_amt", "rand_vol_amt"},
+    {"pad_rand_decay_amt", "rand_decay_amt"},
+    {"pad_chance_pct", "chance_pct"},
+};
+
+static const char *resolve_current_pad_alias_suffix(const char *key) {
+    if (!key) return NULL;
+    for (size_t i = 0; i < sizeof(kCurrentPadAliases) / sizeof(kCurrentPadAliases[0]); i++) {
+        if (strcmp(key, kCurrentPadAliases[i].alias_key) == 0) {
+            return kCurrentPadAliases[i].suffix;
+        }
+    }
+    return NULL;
+}
+
 static int ui_note_to_pad(int note) {
     /* Primary mapping from requirements */
     int pad = mrdrums_engine_note_to_pad(note);
@@ -454,6 +485,15 @@ static int set_param_value(mrdrums_instance_t *inst, const char *key, const char
     if (strcmp(key, "ui_current_pad") == 0) {
         inst->ui_current_pad = clampi(atoi(val), 1, 16);
         return 1;
+    }
+
+    const char *alias_suffix = resolve_current_pad_alias_suffix(key);
+    if (alias_suffix) {
+        char target_key[64];
+        if (!mrdrums_make_pad_key(clampi(inst->ui_current_pad, 1, 16), alias_suffix, target_key, sizeof(target_key))) {
+            return 0;
+        }
+        return set_param_value(inst, target_key, val);
     }
 
     const mrdrums_param_desc_t *pad = mrdrums_find_pad_param(key);
@@ -526,6 +566,15 @@ static int get_param_value(mrdrums_instance_t *inst, const char *key, char *buf,
     if (strcmp(key, "g_rand_seed") == 0) return snprintf(buf, buf_len, "%u", inst->engine.rand_seed);
     if (strcmp(key, "g_rand_loop_steps") == 0) return snprintf(buf, buf_len, "%d", inst->engine.rand_loop_steps);
     if (strcmp(key, "ui_current_pad") == 0) return snprintf(buf, buf_len, "%d", inst->ui_current_pad);
+
+    const char *alias_suffix = resolve_current_pad_alias_suffix(key);
+    if (alias_suffix) {
+        char target_key[64];
+        if (!mrdrums_make_pad_key(clampi(inst->ui_current_pad, 1, 16), alias_suffix, target_key, sizeof(target_key))) {
+            return -1;
+        }
+        return get_param_value(inst, target_key, buf, buf_len);
+    }
 
     const mrdrums_param_desc_t *pad = mrdrums_find_pad_param(key);
     if (!pad) return -1;
@@ -798,6 +847,41 @@ static int build_chain_params_json(char *buf, int buf_len) {
 
     int field_count = 0;
     const mrdrums_pad_field_desc_t *fields = mrdrums_pad_fields(&field_count);
+    for (int fi = 0; fi < field_count; fi++) {
+        const mrdrums_pad_field_desc_t *f = &fields[fi];
+        char key[64];
+        snprintf(key, sizeof(key), "pad_%s", f->suffix);
+
+        if (!is_first) offset += snprintf(buf + offset, buf_len - offset, ",");
+        is_first = 0;
+
+        if (strcmp(f->type, "filepath") == 0) {
+            offset += snprintf(buf + offset, buf_len - offset,
+                               "{\"key\":\"%s\",\"name\":\"Current %s\",\"type\":\"filepath\",\"root\":\"%s\",\"filter\":\"%s\"}",
+                               key,
+                               f->name,
+                               f->root ? f->root : "/data/UserData/UserLibrary/Samples",
+                               f->filter ? f->filter : ".wav");
+        } else if (strcmp(f->type, "enum") == 0) {
+            offset += snprintf(buf + offset, buf_len - offset,
+                               "{\"key\":\"%s\",\"name\":\"Current %s\",\"type\":\"enum\",\"options\":%s,\"default\":\"%s\"}",
+                               key,
+                               f->name,
+                               f->options_json ? f->options_json : "[]",
+                               f->default_str ? f->default_str : "");
+        } else {
+            const char *type = strcmp(f->type, "int") == 0 ? "int" : "float";
+            offset += snprintf(buf + offset, buf_len - offset,
+                               "{\"key\":\"%s\",\"name\":\"Current %s\",\"type\":\"%s\",\"min\":%g,\"max\":%g,\"step\":%g}",
+                               key,
+                               f->name,
+                               type,
+                               f->min_val,
+                               f->max_val,
+                               f->step > 0.0f ? f->step : 1.0f);
+        }
+    }
+
     for (int pad = 1; pad <= MRDRUMS_ENGINE_PAD_COUNT; pad++) {
         for (int fi = 0; fi < field_count; fi++) {
             const mrdrums_pad_field_desc_t *f = &fields[fi];
@@ -845,38 +929,7 @@ static int build_chain_params_json(char *buf, int buf_len) {
 static int build_ui_hierarchy(mrdrums_instance_t *inst, char *buf, int buf_len) {
     if (!buf || buf_len <= 0) return -1;
 
-    int pad = 1;
-    if (inst) {
-        pad = clampi(inst->ui_current_pad, 1, 16);
-    }
-
-    char k_sample_path[32];
-    char k_vol[32];
-    char k_pan[32];
-    char k_tune[32];
-    char k_start[32];
-    char k_attack[32];
-    char k_decay[32];
-    char k_choke[32];
-    char k_mode[32];
-    char k_rand_pan[32];
-    char k_rand_vol[32];
-    char k_rand_decay[32];
-    char k_chance[32];
-
-    if (!mrdrums_make_pad_key(pad, "sample_path", k_sample_path, sizeof(k_sample_path))) return -1;
-    if (!mrdrums_make_pad_key(pad, "vol", k_vol, sizeof(k_vol))) return -1;
-    if (!mrdrums_make_pad_key(pad, "pan", k_pan, sizeof(k_pan))) return -1;
-    if (!mrdrums_make_pad_key(pad, "tune", k_tune, sizeof(k_tune))) return -1;
-    if (!mrdrums_make_pad_key(pad, "start", k_start, sizeof(k_start))) return -1;
-    if (!mrdrums_make_pad_key(pad, "attack_ms", k_attack, sizeof(k_attack))) return -1;
-    if (!mrdrums_make_pad_key(pad, "decay_ms", k_decay, sizeof(k_decay))) return -1;
-    if (!mrdrums_make_pad_key(pad, "choke_group", k_choke, sizeof(k_choke))) return -1;
-    if (!mrdrums_make_pad_key(pad, "mode", k_mode, sizeof(k_mode))) return -1;
-    if (!mrdrums_make_pad_key(pad, "rand_pan_amt", k_rand_pan, sizeof(k_rand_pan))) return -1;
-    if (!mrdrums_make_pad_key(pad, "rand_vol_amt", k_rand_vol, sizeof(k_rand_vol))) return -1;
-    if (!mrdrums_make_pad_key(pad, "rand_decay_amt", k_rand_decay, sizeof(k_rand_decay))) return -1;
-    if (!mrdrums_make_pad_key(pad, "chance_pct", k_chance, sizeof(k_chance))) return -1;
+    (void)inst;
 
     int n = snprintf(
         buf,
@@ -896,23 +949,10 @@ static int build_ui_hierarchy(mrdrums_instance_t *inst, char *buf, int buf_len) 
                 "},"
                 "\"pad_settings\":{"
                     "\"name\":\"Pad Settings\","
-                    "\"params\":[\"ui_current_pad\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"]"
+                    "\"params\":[\"ui_current_pad\",\"pad_sample_path\",\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\",\"pad_rand_pan_amt\",\"pad_rand_vol_amt\",\"pad_rand_decay_amt\",\"pad_chance_pct\"]"
                 "}"
             "}"
-        "}",
-        k_sample_path,
-        k_vol,
-        k_pan,
-        k_tune,
-        k_start,
-        k_attack,
-        k_decay,
-        k_choke,
-        k_mode,
-        k_rand_pan,
-        k_rand_vol,
-        k_rand_decay,
-        k_chance
+        "}"
     );
 
     return (n >= 0 && n < buf_len) ? n : -1;
