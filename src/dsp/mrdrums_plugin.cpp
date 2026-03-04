@@ -579,14 +579,6 @@ static int get_param_value(mrdrums_instance_t *inst, const char *key, char *buf,
 
     const char *alias_suffix = resolve_current_pad_alias_suffix(key);
     if (alias_suffix) {
-        if (strcmp(alias_suffix, "sample_path") == 0) {
-            int pad_index = clampi(inst->ui_current_pad, 1, MRDRUMS_ENGINE_PAD_COUNT) - 1;
-            const char *current_path = inst->pad_sample_paths[pad_index];
-            if (current_path[0]) return snprintf(buf, buf_len, "%s", current_path);
-            if (inst->ui_last_sample_dir[0]) return snprintf(buf, buf_len, "%s", inst->ui_last_sample_dir);
-            return snprintf(buf, buf_len, "%s", "");
-        }
-
         char target_key[64];
         if (!mrdrums_make_pad_key(clampi(inst->ui_current_pad, 1, 16), alias_suffix, target_key, sizeof(target_key))) {
             return -1;
@@ -837,7 +829,7 @@ static int build_state_json(mrdrums_instance_t *inst, char *buf, int buf_len) {
     return (offset < buf_len) ? offset : -1;
 }
 
-static int build_chain_params_json(char *buf, int buf_len) {
+static int build_chain_params_json(mrdrums_instance_t *inst, char *buf, int buf_len) {
     if (!buf || buf_len <= 2) return -1;
 
     int offset = 0;
@@ -882,13 +874,16 @@ static int build_chain_params_json(char *buf, int buf_len) {
         is_first = 0;
 
         if (strcmp(f->type, "filepath") == 0) {
-            if (f->start_path && f->start_path[0]) {
+            const char *effective_start_path = (inst && inst->ui_last_sample_dir[0])
+                ? inst->ui_last_sample_dir
+                : (f->start_path ? f->start_path : "/data/UserData/UserLibrary/Samples");
+            if (effective_start_path && effective_start_path[0]) {
                 offset += snprintf(buf + offset, buf_len - offset,
                                    "{\"key\":\"%s\",\"name\":\"Current %s\",\"type\":\"filepath\",\"root\":\"%s\",\"start_path\":\"%s\",\"filter\":\"%s\"}",
                                    key,
                                    f->name,
                                    f->root ? f->root : "/data/UserData",
-                                   f->start_path,
+                                   effective_start_path,
                                    f->filter ? f->filter : ".wav");
             } else {
                 offset += snprintf(buf + offset, buf_len - offset,
@@ -931,13 +926,16 @@ static int build_chain_params_json(char *buf, int buf_len) {
             is_first = 0;
 
             if (strcmp(f->type, "filepath") == 0) {
-                if (f->start_path && f->start_path[0]) {
+                const char *effective_start_path = (inst && inst->ui_last_sample_dir[0])
+                    ? inst->ui_last_sample_dir
+                    : (f->start_path ? f->start_path : "/data/UserData/UserLibrary/Samples");
+                if (effective_start_path && effective_start_path[0]) {
                     offset += snprintf(buf + offset, buf_len - offset,
                                        "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"start_path\":\"%s\",\"filter\":\"%s\"}",
                                        key,
                                        name,
                                        f->root ? f->root : "/data/UserData",
-                                       f->start_path,
+                                       effective_start_path,
                                        f->filter ? f->filter : ".wav");
                 } else {
                     offset += snprintf(buf + offset, buf_len - offset,
@@ -1010,7 +1008,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
 
     if (strcmp(key, "name") == 0) return snprintf(buf, buf_len, "mrdrums");
     if (strcmp(key, "state") == 0) return build_state_json(inst, buf, buf_len);
-    if (strcmp(key, "chain_params") == 0) return build_chain_params_json(buf, buf_len);
+    if (strcmp(key, "chain_params") == 0) return build_chain_params_json(inst, buf, buf_len);
     if (strcmp(key, "ui_hierarchy") == 0) return build_ui_hierarchy(inst, buf, buf_len);
 
     return get_param_value(inst, key, buf, buf_len);

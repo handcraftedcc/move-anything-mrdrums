@@ -61,7 +61,7 @@ int main() {
 
     int rc = 0;
     rc |= expect_str(api, inst, "p03_sample_path", "");
-    rc |= expect_str(api, inst, "pad_sample_path", "/data/UserData/UserLibrary/Samples/Drums/Kick01.wav");
+    rc |= expect_str(api, inst, "pad_sample_path", "");
 
     api->set_param(inst, "pad_sample_path", "/data/UserData/UserLibrary/Samples/Drums/Snare01.wav");
     rc |= expect_str(api, inst, "p03_sample_path", "/data/UserData/UserLibrary/Samples/Drums/Snare01.wav");
@@ -70,10 +70,10 @@ int main() {
 
     api->set_param(inst, "pad_sample_path", "");
     rc |= expect_str(api, inst, "p03_sample_path", "");
-    rc |= expect_str(api, inst, "pad_sample_path", "/data/UserData/UserLibrary/Samples/Drums/Snare01.wav");
+    rc |= expect_str(api, inst, "pad_sample_path", "");
 
     api->destroy_instance(inst);
     if (rc) return 1;
-    std::printf("PASS: mrdrums filepath seed alias fallback\n");
+    std::printf("PASS: mrdrums filepath alias does not auto-seed empty pads\n");
     return 0;
 }

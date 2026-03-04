@@ -103,22 +103,6 @@ function resolveFileBrowserStartDir(key) {
     return '/data/UserData/UserLibrary/Samples';
 }
 
-function rememberLastSampleDir() {
-    const samplePath = getParamRaw(activePadKey('sample_path'));
-    if (!samplePath) return;
-
-    if (getParamRaw('ui_last_sample_dir') !== samplePath) {
-        setParamRaw('ui_last_sample_dir', samplePath);
-    }
-}
-
-function seedEmptyFilepathFromLastPath(key) {
-    const lastPath = getParamRaw('ui_last_sample_dir');
-    if (!getParamRaw(key) && lastPath) {
-        setParamRaw(key, lastPath);
-    }
-}
-
 function formatValue(control, raw) {
     if (control.type === 'filepath') {
         if (!raw) return '--';
@@ -140,7 +124,6 @@ function adjustControl(control, key, delta) {
 
     if (control.type === 'filepath') {
         if (delta > 0 && typeof host_open_file_browser === 'function') {
-            seedEmptyFilepathFromLastPath(key);
             host_open_file_browser(key, '.wav', resolveFileBrowserStartDir(key));
         }
         if (delta < 0) {
@@ -323,8 +306,6 @@ globalThis.tick = function tick() {
             state.needsRedraw = true;
         }
     }
-
-    rememberLastSampleDir();
 
     if (!state.needsRedraw) return;
     redraw();

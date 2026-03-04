@@ -62,7 +62,19 @@ int main() {
         return fail("filepath start_path metadata missing");
     }
 
+    api->set_param(inst, "ui_last_sample_dir", "/data/UserData/UserLibrary/Samples/Drums/Kicks/Kick07.wav");
+    std::memset(chain_params, 0, sizeof(chain_params));
+    if (api->get_param(inst, "chain_params", chain_params, (int)sizeof(chain_params)) < 0) {
+        api->destroy_instance(inst);
+        return fail("get chain_params after ui_last_sample_dir failed");
+    }
+
+    if (!std::strstr(chain_params, "\"start_path\":\"/data/UserData/UserLibrary/Samples/Drums/Kicks/Kick07.wav\"")) {
+        api->destroy_instance(inst);
+        return fail("filepath start_path did not follow ui_last_sample_dir");
+    }
+
     api->destroy_instance(inst);
-    std::printf("PASS: mrdrums filepath start_path metadata\n");
+    std::printf("PASS: mrdrums filepath start_path metadata (default + dynamic)\n");
     return 0;
 }
