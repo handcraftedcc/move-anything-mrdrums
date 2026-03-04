@@ -47,8 +47,9 @@ mkdir -p "$MODULE_DIR"
 
 echo "Compiling DSP plugin..."
 ${CROSS_PREFIX}g++ -g -O3 -shared -fPIC -std=c++14 \
-    src/dsp/granny_plugin.cpp \
-    src/dsp/granny_engine.cpp \
+    src/dsp/mrdrums_plugin.cpp \
+    src/dsp/mrdrums_engine.cpp \
+    src/dsp/mrdrums_params.cpp \
     -o build/dsp.so \
     -Isrc/dsp \
     -lm
