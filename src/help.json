@@ -1,0 +1,47 @@
+{
+  "title": "mrdrums",
+  "children": [
+    {
+      "title": "Overview",
+      "lines": [
+        "16-pad drum sampler",
+        "for Move Anything.",
+        "",
+        "Each pad keeps its",
+        "own stored params."
+      ]
+    },
+    {
+      "title": "Pages",
+      "lines": [
+        "Global:",
+        "master settings",
+        "",
+        "Pad Settings:",
+        "edit current pad",
+        "without menu diving"
+      ]
+    },
+    {
+      "title": "Pad Editing",
+      "lines": [
+        "On Pad Settings:",
+        "hit pads 1..16",
+        "(notes 36..51)",
+        "to switch target pad.",
+        "",
+        "Focus row stays",
+        "on same parameter."
+      ]
+    },
+    {
+      "title": "Samples",
+      "lines": [
+        "Per-pad sample uses",
+        "filepath browser.",
+        "",
+        "WAV files only."
+      ]
+    }
+  ]
+}
