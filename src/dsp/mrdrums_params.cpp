@@ -12,6 +12,7 @@ static const mrdrums_param_desc_t kGlobalParams[] = {
     {"g_rand_loop_steps", "Rand Loop Steps", "int", NULL, 0, 1.0f, 128.0f, 1.0f, 16.0f, NULL, NULL, NULL, NULL, NULL},
     {"ui_auto_select_pad", "Auto Select", "enum", NULL, 0, 0.0f, 0.0f, 0.0f, 0.0f, "on", "[\"off\",\"on\"]", NULL, NULL, NULL},
     {"ui_current_pad", "Current Pad", "int", NULL, 0, 1.0f, 16.0f, 1.0f, 1.0f, NULL, NULL, NULL, NULL, NULL},
+    {"ui_pad_page", "Pad Page", "enum", NULL, 0, 0.0f, 0.0f, 0.0f, 0.0f, "main", "[\"main\",\"random\"]", NULL, NULL, NULL},
 };
 
 static const mrdrums_pad_field_desc_t kPadFields[] = {

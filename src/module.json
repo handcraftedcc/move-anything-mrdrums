@@ -6,7 +6,6 @@
   "description": "16-pad drum sampler for Schwung",
   "author": "move-anything contributors",
   "license": "MIT",
-  "ui": "ui.js",
   "dsp": "dsp.so",
   "api_version": 2,
   "defaults": {
@@ -18,6 +17,7 @@
     "g_rand_loop_steps": 16,
     "ui_auto_select_pad": "on",
     "ui_current_pad": 1,
+    "ui_pad_page": "main",
     "p01_sample_path": "",
     "p01_vol": 1.0,
     "p01_pan": 0.0,
@@ -234,6 +234,45 @@
     "midi_out": false,
     "aftertouch": false,
     "chainable": true,
-    "component_type": "sound_generator"
+    "component_type": "sound_generator",
+    "ui_hierarchy": {
+      "levels": {
+        "root": {
+          "name": "MrDrums",
+          "params": [
+            { "label": "Global", "level": "global" },
+            { "label": "Pad Settings", "level": "pad_settings" }
+          ],
+          "knobs": ["ui_auto_select_pad", "pad_vol", "pad_pan", "pad_tune", "pad_start", "pad_attack_ms", "pad_decay_ms", "pad_choke_group", "pad_mode"]
+        },
+        "global": {
+          "name": "Global",
+          "params": ["g_master_vol", "g_polyphony", "g_vel_curve", "g_humanize_ms", "g_rand_seed", "g_rand_loop_steps"],
+          "knobs": ["g_master_vol", "g_polyphony", "g_vel_curve", "g_humanize_ms", "g_rand_seed", "g_rand_loop_steps"]
+        },
+        "pad_settings": {
+          "name": "Pad Settings",
+          "params": [
+            "ui_auto_select_pad",
+            "ui_current_pad",
+            "ui_pad_page",
+            { "key": "pad_sample_path", "visible_if": { "param": "ui_pad_page", "equals": "main" } },
+            { "key": "pad_vol", "visible_if": { "param": "ui_pad_page", "equals": "main" } },
+            { "key": "pad_pan", "visible_if": { "param": "ui_pad_page", "equals": "main" } },
+            { "key": "pad_tune", "visible_if": { "param": "ui_pad_page", "equals": "main" } },
+            { "key": "pad_start", "visible_if": { "param": "ui_pad_page", "equals": "main" } },
+            { "key": "pad_attack_ms", "visible_if": { "param": "ui_pad_page", "equals": "main" } },
+            { "key": "pad_decay_ms", "visible_if": { "param": "ui_pad_page", "equals": "main" } },
+            { "key": "pad_choke_group", "visible_if": { "param": "ui_pad_page", "equals": "main" } },
+            { "key": "pad_mode", "visible_if": { "param": "ui_pad_page", "equals": "main" } },
+            { "key": "pad_rand_pan_amt", "visible_if": { "param": "ui_pad_page", "equals": "random" } },
+            { "key": "pad_rand_vol_amt", "visible_if": { "param": "ui_pad_page", "equals": "random" } },
+            { "key": "pad_rand_decay_amt", "visible_if": { "param": "ui_pad_page", "equals": "random" } },
+            { "key": "pad_chance_pct", "visible_if": { "param": "ui_pad_page", "equals": "random" } }
+          ],
+          "knobs": ["ui_auto_select_pad", "ui_current_pad", "ui_pad_page", "pad_vol", "pad_pan", "pad_tune", "pad_start", "pad_attack_ms", "pad_decay_ms", "pad_choke_group", "pad_mode", "pad_rand_pan_amt", "pad_rand_vol_amt", "pad_rand_decay_amt", "pad_chance_pct"]
+        }
+      }
+    }
   }
 }

@@ -72,6 +72,7 @@ typedef struct {
     char last_error[256];
     int ui_auto_select_pad;
     int ui_current_pad;
+    int ui_pad_page; /* 0=main, 1=random */
     char ui_last_sample_dir[512];
 
     mrdrums_engine_t engine;
@@ -411,6 +412,16 @@ static const char *on_off_to_string(int value) {
     return value ? "on" : "off";
 }
 
+static int parse_pad_page(const char *val) {
+    if (!val) return 0;
+    if (strcasecmp(val, "random") == 0 || strcmp(val, "1") == 0) return 1;
+    return 0;
+}
+
+static const char *pad_page_to_string(int value) {
+    return value ? "random" : "main";
+}
+
 static int parse_vel_curve(const char *val) {
     if (!val) return 0;
     if (strcasecmp(val, "soft") == 0 || strcmp(val, "1") == 0) return 1;
@@ -508,6 +519,10 @@ static int set_param_value(mrdrums_instance_t *inst, const char *key, const char
         inst->ui_current_pad = clampi(atoi(val), 1, 16);
         return 1;
     }
+    if (strcmp(key, "ui_pad_page") == 0) {
+        inst->ui_pad_page = parse_pad_page(val);
+        return 1;
+    }
     if (strcmp(key, "ui_last_sample_dir") == 0) {
         snprintf(inst->ui_last_sample_dir, sizeof(inst->ui_last_sample_dir), "%s", val);
         return 1;
@@ -593,6 +608,7 @@ static int get_param_value(mrdrums_instance_t *inst, const char *key, char *buf,
     if (strcmp(key, "g_rand_loop_steps") == 0) return snprintf(buf, buf_len, "%d", inst->engine.rand_loop_steps);
     if (strcmp(key, "ui_auto_select_pad") == 0) return snprintf(buf, buf_len, "%s", on_off_to_string(inst->ui_auto_select_pad));
     if (strcmp(key, "ui_current_pad") == 0) return snprintf(buf, buf_len, "%d", inst->ui_current_pad);
+    if (strcmp(key, "ui_pad_page") == 0) return snprintf(buf, buf_len, "%s", pad_page_to_string(inst->ui_pad_page));
     if (strcmp(key, "ui_last_sample_dir") == 0) return snprintf(buf, buf_len, "%s", inst->ui_last_sample_dir);
 
     const char *alias_suffix = resolve_current_pad_alias_suffix(key);
@@ -661,6 +677,7 @@ static void apply_defaults(mrdrums_instance_t *inst) {
 
     inst->ui_current_pad = clampi(inst->ui_current_pad, 1, 16);
     inst->ui_auto_select_pad = clampi(inst->ui_auto_select_pad, 0, 1);
+    inst->ui_pad_page = clampi(inst->ui_pad_page, 0, 1);
     inst->ui_last_sample_dir[0] = '\0';
 }
 
@@ -746,6 +763,7 @@ static void *v2_create_instance(const char *module_dir, const char *json_default
     mrdrums_engine_init(&inst->engine);
     inst->ui_auto_select_pad = 1;
     inst->ui_current_pad = 1;
+    inst->ui_pad_page = 0;
     set_error(inst, NULL);
 
     apply_defaults(inst);
@@ -946,14 +964,25 @@ static int build_chain_params_json(mrdrums_instance_t *inst, char *buf, int buf_
                                f->default_str ? f->default_str : "");
         } else {
             const char *type = strcmp(f->type, "int") == 0 ? "int" : "float";
-            offset += snprintf(buf + offset, buf_len - offset,
-                               "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"min\":%g,\"max\":%g,\"step\":%g}",
-                               key,
-                               f->name,
-                               type,
-                               f->min_val,
-                               f->max_val,
-                               f->step > 0.0f ? f->step : 1.0f);
+            if (strcmp(f->suffix, "start") == 0) {
+                offset += snprintf(buf + offset, buf_len - offset,
+                                   "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"ui_type\":\"wav_position\",\"mode\":\"start\",\"filepath_param\":\"pad_sample_path\",\"display_unit\":\"percent\",\"min\":%g,\"max\":%g,\"step\":%g,\"shift_increment_multiplier\":0.25}",
+                                   key,
+                                   f->name,
+                                   type,
+                                   f->min_val,
+                                   f->max_val,
+                                   f->step > 0.0f ? f->step : 1.0f);
+            } else {
+                offset += snprintf(buf + offset, buf_len - offset,
+                                   "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"min\":%g,\"max\":%g,\"step\":%g}",
+                                   key,
+                                   f->name,
+                                   type,
+                                   f->min_val,
+                                   f->max_val,
+                                   f->step > 0.0f ? f->step : 1.0f);
+            }
         }
     }
 
@@ -998,14 +1027,30 @@ static int build_chain_params_json(mrdrums_instance_t *inst, char *buf, int buf_
                                    f->default_str ? f->default_str : "");
             } else {
                 const char *type = strcmp(f->type, "int") == 0 ? "int" : "float";
-                offset += snprintf(buf + offset, buf_len - offset,
-                                   "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"min\":%g,\"max\":%g,\"step\":%g}",
-                                   key,
-                                   name,
-                                   type,
-                                   f->min_val,
-                                   f->max_val,
-                                   f->step > 0.0f ? f->step : 1.0f);
+                if (strcmp(f->suffix, "start") == 0) {
+                    char linked_file_key[64];
+                    if (!mrdrums_make_pad_key(pad, "sample_path", linked_file_key, sizeof(linked_file_key))) {
+                        snprintf(linked_file_key, sizeof(linked_file_key), "p%02d_sample_path", pad);
+                    }
+                    offset += snprintf(buf + offset, buf_len - offset,
+                                       "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"ui_type\":\"wav_position\",\"mode\":\"start\",\"filepath_param\":\"%s\",\"display_unit\":\"percent\",\"min\":%g,\"max\":%g,\"step\":%g,\"shift_increment_multiplier\":0.25}",
+                                       key,
+                                       name,
+                                       type,
+                                       linked_file_key,
+                                       f->min_val,
+                                       f->max_val,
+                                       f->step > 0.0f ? f->step : 1.0f);
+                } else {
+                    offset += snprintf(buf + offset, buf_len - offset,
+                                       "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"min\":%g,\"max\":%g,\"step\":%g}",
+                                       key,
+                                       name,
+                                       type,
+                                       f->min_val,
+                                       f->max_val,
+                                       f->step > 0.0f ? f->step : 1.0f);
+                }
             }
         }
     }
