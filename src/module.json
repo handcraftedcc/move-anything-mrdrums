@@ -264,11 +264,10 @@
               "key": "pad_start",
               "type": "wav_position",
               "min": 0,
-              "max": 100,
-              "step": 1,
+              "max": 1,
+              "step": 0.01,
               "options": {
-                "display_unit": "percent",
-                "mode": "trim_front",
+                "mode": "start",
                 "filepath_param": "pad_sample_path",
                 "shift_increment_multiplier": 0.25
               },

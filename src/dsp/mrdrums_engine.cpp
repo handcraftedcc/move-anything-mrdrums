@@ -95,7 +95,7 @@ void mrdrums_engine_set_polyphony(mrdrums_engine_t *engine, int polyphony) {
 
 void mrdrums_engine_set_master_vol(mrdrums_engine_t *engine, float master_vol) {
     if (!engine) return;
-    engine->master_vol = clampf(master_vol, 0.0f, 1.0f);
+    engine->master_vol = clampf(master_vol, 0.0f, 2.0f);
 }
 
 void mrdrums_engine_set_pad_sample(mrdrums_engine_t *engine,
@@ -137,7 +137,7 @@ void mrdrums_engine_set_pad_attack_ms(mrdrums_engine_t *engine, int pad_index, f
 void mrdrums_engine_set_pad_vol(mrdrums_engine_t *engine, int pad_index, float vol) {
     mrdrums_pad_t *pad = get_pad_mut(engine, pad_index);
     if (!pad) return;
-    pad->vol = clampf(vol, 0.0f, 1.0f);
+    pad->vol = clampf(vol, 0.0f, 2.0f);
 }
 
 void mrdrums_engine_set_pad_pan(mrdrums_engine_t *engine, int pad_index, float pan) {
@@ -261,7 +261,7 @@ void mrdrums_engine_note_on(mrdrums_engine_t *engine, int note, int velocity) {
     v->sample_inc = clampf(src_to_out * pitch_ratio, 0.05f, 8.0f);
 
     float vel = apply_velocity_curve((float)velocity / 127.0f, engine->vel_curve);
-    float gain = vel * clampf(pad->vol, 0.0f, 1.0f) * engine->master_vol;
+    float gain = vel * clampf(pad->vol, 0.0f, 2.0f) * engine->master_vol;
 
     float pan = clampf(pad->pan, -1.0f, 1.0f);
     if (pad->rand_pan_amt > 0.0f) {

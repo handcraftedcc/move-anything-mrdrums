@@ -21,6 +21,7 @@ int main() {
 
     const mrdrums_param_desc_t *global = mrdrums_find_global_param("g_master_vol");
     if (!global) return fail("missing g_master_vol descriptor");
+    if (global->max_val != 2.0f) return fail("g_master_vol max expected 2.0");
     const mrdrums_param_desc_t *auto_select = mrdrums_find_global_param("ui_auto_select_pad");
     if (!auto_select) return fail("missing ui_auto_select_pad descriptor");
     if (std::strcmp(auto_select->type, "enum") != 0) return fail("ui_auto_select_pad type expected enum");
@@ -37,6 +38,10 @@ int main() {
     const mrdrums_param_desc_t *pan = mrdrums_find_pad_param("p01_pan");
     if (!pan) return fail("missing p01_pan descriptor");
     if (pan->step != 0.1f) return fail("pan step expected 0.1");
+
+    const mrdrums_param_desc_t *vol = mrdrums_find_pad_param("p01_vol");
+    if (!vol) return fail("missing p01_vol descriptor");
+    if (vol->max_val != 2.0f) return fail("vol max expected 2.0");
 
     const mrdrums_param_desc_t *start = mrdrums_find_pad_param("p01_start");
     if (!start) return fail("missing p01_start descriptor");

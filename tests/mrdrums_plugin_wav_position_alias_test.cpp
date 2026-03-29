@@ -46,7 +46,7 @@ int main() {
     api->set_param(inst, "ui_current_pad", "1");
     api->set_param(inst, "p01_start", "0.0000");
 
-    api->set_param(inst, "pad_start", "25.0");
+    api->set_param(inst, "pad_start", "0.25");
 
     char pad_start_raw[64];
     std::memset(pad_start_raw, 0, sizeof(pad_start_raw));
@@ -62,10 +62,10 @@ int main() {
         return fail("get p01_start failed");
     }
 
-    const float pad_start_pct = (float)std::atof(pad_start_raw);
+    const float pad_start_val = (float)std::atof(pad_start_raw);
     const float p01_start_norm = (float)std::atof(p01_start_raw);
-    if (pad_start_pct < 24.9f || pad_start_pct > 25.1f) {
-        std::fprintf(stderr, "FAIL: pad_start expected ~25, got %s\n", pad_start_raw);
+    if (pad_start_val < 0.249f || pad_start_val > 0.251f) {
+        std::fprintf(stderr, "FAIL: pad_start expected ~0.25, got %s\n", pad_start_raw);
         api->destroy_instance(inst);
         return 1;
     }
@@ -86,12 +86,16 @@ int main() {
         api->destroy_instance(inst);
         return fail("pad_start is not exposed as native wav_position type");
     }
+    if (!std::strstr(chain_params, "\"key\":\"pad_start\",\"name\":\"Start\",\"type\":\"wav_position\",\"mode\":\"start\",\"filepath_param\":\"pad_sample_path\",\"min\":0,\"max\":1,\"step\":0.01")) {
+        api->destroy_instance(inst);
+        return fail("pad_start wav_position range should be normalized 0..1");
+    }
     if (!std::strstr(chain_params, "\"filepath_param\":\"pad_sample_path\"")) {
         api->destroy_instance(inst);
         return fail("pad_start wav_position filepath linkage missing");
     }
 
     api->destroy_instance(inst);
-    std::printf("PASS: mrdrums wav_position alias uses percent UI + normalized storage\n");
+    std::printf("PASS: mrdrums wav_position alias uses normalized 0..1 values\n");
     return 0;
 }

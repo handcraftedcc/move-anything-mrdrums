@@ -4,7 +4,7 @@
 #include <string.h>
 
 static const mrdrums_param_desc_t kGlobalParams[] = {
-    {"g_master_vol", "Master Vol", "float", NULL, 0, 0.0f, 1.0f, 0.01f, 1.0f, NULL, NULL, NULL, NULL, NULL},
+    {"g_master_vol", "Master Vol", "float", NULL, 0, 0.0f, 2.0f, 0.01f, 1.0f, NULL, NULL, NULL, NULL, NULL},
     {"g_polyphony", "Polyphony", "int", NULL, 0, 1.0f, 64.0f, 1.0f, 16.0f, NULL, NULL, NULL, NULL, NULL},
     {"g_vel_curve", "Velocity Curve", "enum", NULL, 0, 0.0f, 0.0f, 0.0f, 0.0f, "linear", "[\"linear\",\"soft\",\"hard\"]", NULL, NULL, NULL},
     {"g_humanize_ms", "Humanize", "float", NULL, 0, 0.0f, 50.0f, 0.1f, 0.0f, NULL, NULL, NULL, NULL, NULL},
@@ -17,7 +17,7 @@ static const mrdrums_param_desc_t kGlobalParams[] = {
 
 static const mrdrums_pad_field_desc_t kPadFields[] = {
     {"sample_path", "Sample", "filepath", 0.0f, 0.0f, 0.0f, 0.0f, "", NULL, "/data/UserData/UserLibrary/Samples", ".wav", "/data/UserData/UserLibrary/Samples"},
-    {"vol", "Vol", "float", 0.0f, 1.0f, 0.01f, 1.0f, NULL, NULL, NULL, NULL, NULL},
+    {"vol", "Vol", "float", 0.0f, 2.0f, 0.01f, 1.0f, NULL, NULL, NULL, NULL, NULL},
     {"pan", "Pan", "float", -1.0f, 1.0f, 0.1f, 0.0f, NULL, NULL, NULL, NULL, NULL},
     {"tune", "Tune", "float", -24.0f, 24.0f, 1.0f, 0.0f, NULL, NULL, NULL, NULL, NULL},
     {"start", "Start", "float", 0.0f, 1.0f, 0.01f, 0.0f, NULL, NULL, NULL, NULL, NULL},
