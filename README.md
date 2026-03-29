@@ -76,6 +76,8 @@ Top-level pages:
 - `Rand Pan`, `Rand Vol`, `Rand Decay`
 - `Chance`
 
+`Start` now uses native `wav_position` with normalized range `0.00..1.00` (start-to-end of the sample).
+
 Pad aliases (for fast editing) map to the selected `Current Pad` while keeping all `pXX_*` values persisted per pad.
 
 ## File Browser Behavior

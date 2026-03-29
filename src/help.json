@@ -81,6 +81,10 @@
         "Attack, Decay,",
         "Choke, Mode",
         "",
+        "Start uses native",
+        "wav_position in",
+        "range 0.00..1.00",
+        "",
         "Rand Pan/Vol/Dec,",
         "Chance"
       ]
