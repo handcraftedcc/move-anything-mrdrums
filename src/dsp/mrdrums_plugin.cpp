@@ -7,6 +7,10 @@
 #include <string.h>
 #include <strings.h>
 #include <vector>
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <cmath>
 
 #include "mrdrums_engine.h"
 #include "mrdrums_params.h"
@@ -74,6 +78,7 @@ typedef struct {
     int ui_current_pad;
     int ui_pad_page; /* 0=main, 1=random */
     char ui_last_sample_dir[512];
+    char ui_preset_path[512]; /* last-loaded preset, stored for browser scroll-restore only */
 
     mrdrums_engine_t engine;
     char pad_sample_paths[MRDRUMS_ENGINE_PAD_COUNT][512];
@@ -336,6 +341,249 @@ static int json_escape(const char *src, char *dst, int dst_len) {
     return o;
 }
 
+static void format_filter_json(const char *filter, char *out_buf, size_t out_len) {
+    if (!filter || !filter[0]) {
+        snprintf(out_buf, out_len, "\".wav\"");
+        return;
+    }
+    if (filter[0] == '[') {
+        snprintf(out_buf, out_len, "%s", filter);
+    } else {
+        snprintf(out_buf, out_len, "\"%s\"", filter);
+    }
+}
+
+static std::string url_decode(const std::string &src) {
+    std::string ret;
+    ret.reserve(src.length());
+    for (size_t i = 0; i < src.length(); i++) {
+        if (src[i] == '%' && i + 2 < src.length()) {
+            int hex1 = src[i+1];
+            int hex2 = src[i+2];
+            char c = 0;
+            if (hex1 >= '0' && hex1 <= '9') c += (hex1 - '0') * 16;
+            else if (hex1 >= 'a' && hex1 <= 'f') c += (hex1 - 'a' + 10) * 16;
+            else if (hex1 >= 'A' && hex1 <= 'F') c += (hex1 - 'A' + 10) * 16;
+
+            if (hex2 >= '0' && hex2 <= '9') c += (hex2 - '0');
+            else if (hex2 >= 'a' && hex2 <= 'f') c += (hex2 - 'a' + 10);
+            else if (hex2 >= 'A' && hex2 <= 'F') c += (hex2 - 'A' + 10);
+
+            ret.push_back(c);
+            i += 2;
+        } else if (src[i] == '+') {
+            ret.push_back(' ');
+        } else {
+            ret.push_back(src[i]);
+        }
+    }
+    return ret;
+}
+
+static float extract_float(const std::string &block, const char *key, float default_val) {
+    char needle[128];
+    snprintf(needle, sizeof(needle), "\"%s\":", key);
+    const char *p = strstr(block.c_str(), needle);
+    if (!p) {
+        snprintf(needle, sizeof(needle), "\"%s\" :", key);
+        p = strstr(block.c_str(), needle);
+    }
+    if (!p) return default_val;
+    p = strchr(p, ':');
+    if (!p) return default_val;
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+    return (float)atof(p);
+}
+
+/* Move's native .ablpreset (substring of .ablpresetbundle, so reject bundles). */
+static int has_preset_extension(const char *path) {
+    if (!path) return 0;
+    int len = strlen(path);
+    const int n = 10; /* ".ablpreset" */
+    if (len < n) return 0;
+    if (strcasecmp(path + len - n, ".ablpreset") != 0) return 0;
+    return 1;
+}
+
+/* Resolve a drumCell sampleUri to an on-device absolute path.
+ * Move uses the ableton:/user-library/ scheme for shared-pool samples;
+ * already-absolute and relative URIs are handled as fallbacks. */
+static std::string resolve_sample_uri(const std::string &uri, const char *preset_dir) {
+    std::string decoded = url_decode(uri);
+    const char *ul = "ableton:/user-library/";
+    if (decoded.compare(0, strlen(ul), ul) == 0) {
+        return std::string("/data/UserData/UserLibrary/") + decoded.substr(strlen(ul));
+    }
+    if (!decoded.empty() && decoded[0] == '/') {
+        return decoded;
+    }
+    /* relative URI: resolve against the preset's own directory */
+    return std::string(preset_dir) + "/" + decoded;
+}
+
+static int set_pad_sample_path(mrdrums_instance_t *inst, int pad_index, const char *path);
+static int set_param_value(mrdrums_instance_t *inst, const char *key, const char *val);
+
+static int load_preset(mrdrums_instance_t *inst, const char *preset_path) {
+    /* directory the preset lives in, for resolving any relative sample URIs */
+    char preset_dir[1024];
+    snprintf(preset_dir, sizeof(preset_dir), "%s", preset_path);
+    char *last_slash = strrchr(preset_dir, '/');
+    if (last_slash) *last_slash = '\0'; else preset_dir[0] = '.', preset_dir[1] = '\0';
+
+    std::ifstream t(preset_path);
+    if (!t.is_open()) {
+        set_error(inst, "Could not open preset file");
+        return -1;
+    }
+    std::stringstream buffer;
+    buffer << t.rdbuf();
+    std::string json_str = buffer.str();
+    t.close();
+
+    const char *start_pos = strstr(json_str.c_str(), "\"kind\": \"drumRack\"");
+    if (!start_pos) {
+        start_pos = strstr(json_str.c_str(), "\"kind\":\"drumRack\"");
+    }
+    if (!start_pos) {
+        set_error(inst, "Preset does not contain a drumRack");
+        return -1;
+    }
+
+    const char *chains_pos = strstr(start_pos, "\"chains\": [");
+    if (!chains_pos) {
+        chains_pos = strstr(start_pos, "\"chains\":[");
+    }
+    if (!chains_pos) {
+        set_error(inst, "drumRack missing chains");
+        return -1;
+    }
+
+    const char *p = strchr(chains_pos, '[');
+    if (!p) {
+        set_error(inst, "drumRack chains invalid structure");
+        return -1;
+    }
+    p++;
+
+    int depth = 0;
+    const char *chain_start = NULL;
+
+    while (*p) {
+        if (*p == '{') {
+            if (depth == 0) {
+                chain_start = p;
+            }
+            depth++;
+        } else if (*p == '}') {
+            depth--;
+            if (depth == 0 && chain_start) {
+                std::string chain_block(chain_start, p - chain_start + 1);
+
+                int note = -1;
+                const char *note_pos = strstr(chain_block.c_str(), "\"receivingNote\":");
+                if (!note_pos) note_pos = strstr(chain_block.c_str(), "\"receivingNote\" :");
+                if (note_pos) {
+                    note = atoi(note_pos + 16);
+                }
+
+                if (note >= 36 && note <= 51) {
+                    int pad_index = note - 35;
+
+                    std::string sample_uri;
+                    const char *uri_pos = strstr(chain_block.c_str(), "\"sampleUri\":");
+                    if (!uri_pos) uri_pos = strstr(chain_block.c_str(), "\"sampleUri\" :");
+                    if (uri_pos) {
+                        const char *colon = strchr(uri_pos, ':');
+                        if (colon) {
+                            const char *quote_start = strchr(colon, '"');
+                            if (quote_start) {
+                                quote_start++;
+                                const char *quote_end = strchr(quote_start, '"');
+                                if (quote_end) {
+                                    sample_uri = std::string(quote_start, quote_end - quote_start);
+                                }
+                            }
+                        }
+                    }
+
+                    char resolved_wav_path[1024] = "";
+                    if (!sample_uri.empty()) {
+                        std::string resolved = resolve_sample_uri(sample_uri, preset_dir);
+                        snprintf(resolved_wav_path, sizeof(resolved_wav_path), "%s", resolved.c_str());
+                    }
+
+                    float db = extract_float(chain_block, "Volume", -12.0f);
+                    float vol = clampf(powf(10.0f, (db + 12.0f) / 20.0f), 0.0f, 2.0f);
+                    float pan = extract_float(chain_block, "Pan", 0.0f);
+                    float tune = extract_float(chain_block, "Voice_Transpose", 0.0f);
+                    float start = extract_float(chain_block, "Voice_PlaybackStart", 0.0f);
+                    float attack_sec = extract_float(chain_block, "Voice_Envelope_Attack", 0.0f);
+                    float attack_ms = attack_sec * 1000.0f;
+                    float decay_sec = extract_float(chain_block, "Voice_Envelope_Decay", 0.25f);
+                    float decay_ms = decay_sec * 1000.0f;
+
+                    int choke_group = 0;
+                    const char *choke_pos = strstr(chain_block.c_str(), "\"chokeGroup\":");
+                    if (!choke_pos) choke_pos = strstr(chain_block.c_str(), "\"chokeGroup\" :");
+                    if (choke_pos) {
+                        const char *col = strchr(choke_pos, ':');
+                        if (col) {
+                            col++;
+                            while (*col == ' ' || *col == '\t') col++;
+                            if (strncmp(col, "null", 4) != 0) {
+                                choke_group = atoi(col);
+                            }
+                        }
+                    }
+
+                    set_pad_sample_path(inst, pad_index, resolved_wav_path);
+
+                    char key[64];
+                    char val_str[128];
+
+                    mrdrums_make_pad_key(pad_index, "vol", key, sizeof(key));
+                    snprintf(val_str, sizeof(val_str), "%.6g", vol);
+                    set_param_value(inst, key, val_str);
+
+                    mrdrums_make_pad_key(pad_index, "pan", key, sizeof(key));
+                    snprintf(val_str, sizeof(val_str), "%.6g", pan);
+                    set_param_value(inst, key, val_str);
+
+                    mrdrums_make_pad_key(pad_index, "tune", key, sizeof(key));
+                    snprintf(val_str, sizeof(val_str), "%.6g", tune);
+                    set_param_value(inst, key, val_str);
+
+                    mrdrums_make_pad_key(pad_index, "start", key, sizeof(key));
+                    snprintf(val_str, sizeof(val_str), "%.6g", start);
+                    set_param_value(inst, key, val_str);
+
+                    mrdrums_make_pad_key(pad_index, "attack_ms", key, sizeof(key));
+                    snprintf(val_str, sizeof(val_str), "%.6g", attack_ms);
+                    set_param_value(inst, key, val_str);
+
+                    mrdrums_make_pad_key(pad_index, "decay_ms", key, sizeof(key));
+                    snprintf(val_str, sizeof(val_str), "%.6g", decay_ms);
+                    set_param_value(inst, key, val_str);
+
+                    mrdrums_make_pad_key(pad_index, "choke_group", key, sizeof(key));
+                    snprintf(val_str, sizeof(val_str), "%d", choke_group);
+                    set_param_value(inst, key, val_str);
+                }
+
+                chain_start = NULL;
+            }
+        } else if (*p == ']' && depth == 0) {
+            break;
+        }
+        p++;
+    }
+
+    set_error(inst, NULL);
+    return 0;
+}
+
 static void clear_pad_sample(mrdrums_instance_t *inst, int pad_index) {
     if (!inst || pad_index < 1 || pad_index > MRDRUMS_ENGINE_PAD_COUNT) return;
     int i = pad_index - 1;
@@ -527,6 +775,14 @@ static int set_param_value(mrdrums_instance_t *inst, const char *key, const char
         snprintf(inst->ui_last_sample_dir, sizeof(inst->ui_last_sample_dir), "%s", val);
         return 1;
     }
+    if (strcmp(key, "ui_preset_path") == 0) {
+        /* live UI selection: remember the path (browser scroll-restore) and
+         * apply the preset. State restore stores the path WITHOUT loading so
+         * local pad tweaks win — see apply_state_json. */
+        snprintf(inst->ui_preset_path, sizeof(inst->ui_preset_path), "%s", val);
+        if (val[0]) load_preset(inst, val);
+        return 1;
+    }
 
     const char *alias_suffix = resolve_current_pad_alias_suffix(key);
     if (alias_suffix) {
@@ -610,6 +866,7 @@ static int get_param_value(mrdrums_instance_t *inst, const char *key, char *buf,
     if (strcmp(key, "ui_current_pad") == 0) return snprintf(buf, buf_len, "%d", inst->ui_current_pad);
     if (strcmp(key, "ui_pad_page") == 0) return snprintf(buf, buf_len, "%s", pad_page_to_string(inst->ui_pad_page));
     if (strcmp(key, "ui_last_sample_dir") == 0) return snprintf(buf, buf_len, "%s", inst->ui_last_sample_dir);
+    if (strcmp(key, "ui_preset_path") == 0) return snprintf(buf, buf_len, "%s", inst->ui_preset_path);
 
     const char *alias_suffix = resolve_current_pad_alias_suffix(key);
     if (alias_suffix) {
@@ -702,7 +959,13 @@ static void apply_state_json(mrdrums_instance_t *inst, const char *json) {
         } else if (strcmp(globals[i].type, "filepath") == 0) {
             char str_value[512];
             if (json_get_string(json, globals[i].key, str_value, sizeof(str_value)) == 0) {
-                set_param_value(inst, globals[i].key, str_value);
+                /* ui_preset_path: store path only — do NOT re-load the preset on
+                 * restore, so persisted per-pad tweaks take priority. */
+                if (strcmp(globals[i].key, "ui_preset_path") == 0) {
+                    snprintf(inst->ui_preset_path, sizeof(inst->ui_preset_path), "%s", str_value);
+                } else {
+                    set_param_value(inst, globals[i].key, str_value);
+                }
             }
         } else {
             float num_value;
@@ -912,6 +1175,14 @@ static int build_chain_params_json(mrdrums_instance_t *inst, char *buf, int buf_
                                g->name,
                                g->options_json ? g->options_json : "[]",
                                g->default_str ? g->default_str : "");
+        } else if (strcmp(g->type, "filepath") == 0) {
+            char filter_json[128];
+            format_filter_json(g->filter, filter_json, sizeof(filter_json));
+            const char *root = g->root ? g->root : "/data/UserData/UserLibrary/Samples";
+            const char *start = g->start_path ? g->start_path : root;
+            offset += snprintf(buf + offset, buf_len - offset,
+                               "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"start_path\":\"%s\",\"filter\":%s}",
+                               g->key, g->name, root, start, filter_json);
         } else {
             const char *type = strcmp(g->type, "int") == 0 ? "int" : "float";
             offset += snprintf(buf + offset, buf_len - offset,
@@ -939,21 +1210,23 @@ static int build_chain_params_json(mrdrums_instance_t *inst, char *buf, int buf_
             const char *effective_start_path = (inst && inst->ui_last_sample_dir[0])
                 ? inst->ui_last_sample_dir
                 : (f->start_path ? f->start_path : "/data/UserData/UserLibrary/Samples");
+            char filter_json[128];
+            format_filter_json(f->filter, filter_json, sizeof(filter_json));
             if (effective_start_path && effective_start_path[0]) {
                 offset += snprintf(buf + offset, buf_len - offset,
-                                   "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"start_path\":\"%s\",\"filter\":\"%s\",\"live_preview\":true,\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}}",
+                                   "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"start_path\":\"%s\",\"filter\":%s,\"live_preview\":true,\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}}",
                                    key,
                                    f->name,
                                    f->root ? f->root : "/data/UserData/UserLibrary/Samples",
                                    effective_start_path,
-                                   f->filter ? f->filter : ".wav");
+                                   filter_json);
             } else {
                 offset += snprintf(buf + offset, buf_len - offset,
-                                   "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"filter\":\"%s\",\"live_preview\":true,\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}}",
+                                   "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"filter\":%s,\"live_preview\":true,\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}}",
                                    key,
                                    f->name,
                                    f->root ? f->root : "/data/UserData/UserLibrary/Samples",
-                                   f->filter ? f->filter : ".wav");
+                                   filter_json);
             }
         } else if (strcmp(f->type, "enum") == 0) {
             offset += snprintf(buf + offset, buf_len - offset,
@@ -998,21 +1271,23 @@ static int build_chain_params_json(mrdrums_instance_t *inst, char *buf, int buf_
                 const char *effective_start_path = (inst && inst->ui_last_sample_dir[0])
                     ? inst->ui_last_sample_dir
                     : (f->start_path ? f->start_path : "/data/UserData/UserLibrary/Samples");
+                char filter_json[128];
+                format_filter_json(f->filter, filter_json, sizeof(filter_json));
                 if (effective_start_path && effective_start_path[0]) {
                     offset += snprintf(buf + offset, buf_len - offset,
-                                       "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"start_path\":\"%s\",\"filter\":\"%s\",\"live_preview\":true,\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}}",
+                                       "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"start_path\":\"%s\",\"filter\":%s,\"live_preview\":true,\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}}",
                                        key,
                                        name,
                                        f->root ? f->root : "/data/UserData/UserLibrary/Samples",
                                        effective_start_path,
-                                       f->filter ? f->filter : ".wav");
+                                       filter_json);
                 } else {
                     offset += snprintf(buf + offset, buf_len - offset,
-                                       "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"filter\":\"%s\",\"live_preview\":true,\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}}",
+                                       "{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"filepath\",\"root\":\"%s\",\"filter\":%s,\"live_preview\":true,\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}}",
                                        key,
                                        name,
                                        f->root ? f->root : "/data/UserData/UserLibrary/Samples",
-                                       f->filter ? f->filter : ".wav");
+                                       filter_json);
                 }
             } else if (strcmp(f->type, "enum") == 0) {
                 offset += snprintf(buf + offset, buf_len - offset,
@@ -1069,7 +1344,8 @@ static int build_ui_hierarchy(mrdrums_instance_t *inst, char *buf, int buf_len) 
                     "\"name\":\"MrDrums\","
                     "\"params\":["
                         "{\"label\":\"Global\",\"level\":\"global\"},"
-                        "{\"label\":\"Pad Settings\",\"level\":\"pad_settings\"}"
+                        "{\"label\":\"Pad Settings\",\"level\":\"pad_settings\"},"
+                        "\"ui_preset_path\""
                     "],"
                     "\"knobs\":[\"ui_auto_select_pad\",\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\"]"
                 "},"

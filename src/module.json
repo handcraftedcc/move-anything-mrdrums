@@ -241,7 +241,8 @@
           "name": "MrDrums",
           "params": [
             { "label": "Global", "level": "global" },
-            { "label": "Pad Settings", "level": "pad_settings" }
+            { "label": "Pad Settings", "level": "pad_settings" },
+            "ui_preset_path"
           ],
           "knobs": ["ui_auto_select_pad", "pad_vol", "pad_pan", "pad_tune", "pad_start", "pad_attack_ms", "pad_decay_ms", "pad_choke_group", "pad_mode"]
         },
