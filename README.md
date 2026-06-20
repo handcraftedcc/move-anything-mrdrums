@@ -18,6 +18,7 @@ By default, all pad sample paths are empty, so MrDrums is silent until you set a
 ## Features
 
 - 16 drum pads mapped to notes `36..51`
+- **Load drum kits directly from Move `.ablpreset` files** — maps all 16 cells in one action
 - Fully persisted parameter model:
   - Global keys (`g_*`)
   - Per-pad keys (`p01_*` .. `p16_*`)
@@ -112,6 +113,18 @@ Install target:
 ```
 
 Restart Schwung after install.
+
+## Loading Move Drum Kit Presets
+
+MrDrums can load native Ableton Move drum kit presets (`.ablpreset`) to populate all 16 pads at once.
+
+1. From the root menu, select **Load Preset**.
+2. Browse to a `.ablpreset` file under `Track Presets`.
+3. Confirm — all 16 pad sample paths and their parameters (volume, pan, tune, start, attack, decay, choke group) are applied instantly.
+
+The `ableton:/user-library/` URI scheme used in Move presets is resolved automatically to `/data/UserData/UserLibrary/`.
+
+> Per-pad edits made after loading are not overwritten when restoring saved state — the preset path is remembered for browse scroll-restore only.
 
 ## Current Limitations
 
