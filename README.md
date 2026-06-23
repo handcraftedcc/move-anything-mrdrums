@@ -9,8 +9,9 @@ MrDrums gives you 16 pads with independent sample paths and per-pad controls for
 1. Install `MrDrums` from the Module Store.
 2. Load `MrDrums` in a chain.
 3. Open `Pad Settings`.
-4. Select `Sample` and choose a `.wav` from:
+4. Select `Sample` and choose a `.wav`, `.aif`, or `.aiff` from:
    - `/data/UserData/UserLibrary/Samples`
+   - `/data/CoreLibrary/Samples`
 5. Play pads/notes (`36..51`).
 
 By default, all pad sample paths are empty, so MrDrums is silent until you set at least one sample.
@@ -18,7 +19,7 @@ By default, all pad sample paths are empty, so MrDrums is silent until you set a
 ## Features
 
 - 16 drum pads mapped to notes `36..51`
-- **Load drum kits directly from Move `.ablpreset` files** — maps all 16 cells in one action
+- **Load drum kits directly from Move `.ablpreset` and native `.json` preset files** — maps all 16 cells in one action
 - Fully persisted parameter model:
   - Global keys (`g_*`)
   - Per-pad keys (`p01_*` .. `p16_*`)
@@ -38,7 +39,7 @@ By default, all pad sample paths are empty, so MrDrums is silent until you set a
 ## Prerequisites
 
 - [Schwung](https://github.com/charlesvestal/move-anything) installed on your Ableton Move
-- WAV files available on device (recommended path below)
+- WAV or AIFF files available on device (recommended path below)
 
 ## Requirements
 
@@ -49,7 +50,7 @@ Recommended sample folder:
 ```
 
 Supported input format:
-- `.wav` files
+- `.wav`, `.aif`, `.aiff`
 
 ## Controls
 
@@ -70,7 +71,7 @@ Top-level pages:
 
 - `Auto Select`: When `on`, incoming pad notes change `Current Pad`.
 - `Current Pad`: Pad target for alias controls.
-- `Sample`: Per-pad WAV file path.
+- `Sample`: Per-pad WAV/AIFF file path.
 - `Vol`, `Pan`, `Tune`, `Start`
 - `Attack`, `Decay`
 - `Choke`, `Mode` (`gate` / `oneshot`)
@@ -84,7 +85,7 @@ Pad aliases (for fast editing) map to the selected `Current Pad` while keeping a
 ## File Browser Behavior
 
 For pad `Sample`:
-- Root path is constrained to user sample space.
+- Root path is `/data`, including UserLibrary and CoreLibrary.
 - `start_path` prefers last-used sample directory when available.
 - Live preview is enabled while browsing.
 - Auto-select can be suspended during browsing through configured browser hooks.
@@ -116,19 +117,20 @@ Restart Schwung after install.
 
 ## Loading Move Drum Kit Presets
 
-MrDrums can load native Ableton Move drum kit presets (`.ablpreset`) to populate all 16 pads at once.
+MrDrums can load native Ableton Move drum kit presets (`.ablpreset` and device-preset `.json`) to populate all 16 pads at once.
 
 1. From the root menu, select **Load Preset**.
-2. Browse to a `.ablpreset` file under `Track Presets`.
+2. Browse to a `.ablpreset` or `.json` file under `Track Presets` or elsewhere under `/data`.
 3. Confirm — all 16 pad sample paths and their parameters (volume, pan, tune, start, attack, decay, choke group) are applied instantly.
 
-The `ableton:/user-library/` URI scheme used in Move presets is resolved automatically to `/data/UserData/UserLibrary/`.
+Known preset sample URI mappings:
+- `ableton:/user-library/...` -> `/data/UserData/UserLibrary/...`
+- `ableton:/packs/abl-core-library/...` -> `/data/CoreLibrary/...`
 
 > Per-pad edits made after loading are not overwritten when restoring saved state — the preset path is remembered for browse scroll-restore only.
 
 ## Current Limitations
 
-- WAV-only sample input
 - Single sample per pad (no layer stacks)
 
 ## AI Assistance Disclaimer

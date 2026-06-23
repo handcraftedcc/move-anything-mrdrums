@@ -1,4 +1,5 @@
 #include <dirent.h>
+#include <ctype.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -110,10 +111,38 @@ static uint32_t rd_u32_le(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+static uint16_t rd_u16_be(const uint8_t *p) {
+    return ((uint16_t)p[0] << 8) | (uint16_t)p[1];
+}
+
+static uint32_t rd_u32_be(const uint8_t *p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
 static int32_t rd_i24_le(const uint8_t *p) {
     int32_t v = ((int32_t)p[0]) | ((int32_t)p[1] << 8) | ((int32_t)p[2] << 16);
     if (v & 0x00800000) v |= ~0x00FFFFFF;
     return v;
+}
+
+static int32_t rd_i24_be(const uint8_t *p) {
+    int32_t v = ((int32_t)p[0] << 16) | ((int32_t)p[1] << 8) | (int32_t)p[2];
+    if (v & 0x00800000) v |= ~0x00FFFFFF;
+    return v;
+}
+
+static double rd_ieee_extended_be(const uint8_t *p) {
+    uint16_t exponent = rd_u16_be(p);
+    uint32_t hi_mant = rd_u32_be(p + 2);
+    uint32_t lo_mant = rd_u32_be(p + 6);
+    if ((exponent & 0x7FFFu) == 0 && hi_mant == 0 && lo_mant == 0) {
+        return 0.0;
+    }
+
+    int sign = (exponent & 0x8000u) ? -1 : 1;
+    int exp = (int)(exponent & 0x7FFFu) - 16383;
+    double value = ldexp((double)hi_mant, exp - 31) + ldexp((double)lo_mant, exp - 63);
+    return sign < 0 ? -value : value;
 }
 
 static int load_wav_mono(const char *path, sample_buffer_t *out, char *err, int err_len) {
@@ -279,15 +308,245 @@ static int load_wav_mono(const char *path, sample_buffer_t *out, char *err, int 
     return 0;
 }
 
+static int load_aiff_mono(const char *path, sample_buffer_t *out, char *err, int err_len) {
+    if (!path || !out) return -1;
+    memset(out, 0, sizeof(*out));
+
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        snprintf(err, err_len, "Could not open sample file: %s", path);
+        return -1;
+    }
+
+    uint8_t form[12];
+    if (fread(form, 1, 12, fp) != 12) {
+        fclose(fp);
+        snprintf(err, err_len, "Invalid AIFF header");
+        return -1;
+    }
+    if (memcmp(form, "FORM", 4) != 0) {
+        fclose(fp);
+        snprintf(err, err_len, "Not an AIFF file");
+        return -1;
+    }
+
+    int is_aifc = 0;
+    if (memcmp(form + 8, "AIFF", 4) == 0) {
+        is_aifc = 0;
+    } else if (memcmp(form + 8, "AIFC", 4) == 0) {
+        is_aifc = 1;
+    } else {
+        fclose(fp);
+        snprintf(err, err_len, "Unsupported AIFF container");
+        return -1;
+    }
+
+    int have_comm = 0;
+    int have_ssnd = 0;
+    int little_endian_pcm = 0;
+    uint16_t channels = 0;
+    uint16_t bits_per_sample = 0;
+    uint32_t sample_rate = 0;
+    uint32_t data_size = 0;
+    long data_offset = 0;
+
+    while (!feof(fp)) {
+        uint8_t chdr[8];
+        if (fread(chdr, 1, 8, fp) != 8) break;
+
+        uint32_t chunk_size = rd_u32_be(chdr + 4);
+        long chunk_data_pos = ftell(fp);
+
+        if (memcmp(chdr, "COMM", 4) == 0) {
+            if (chunk_size < 18) {
+                fclose(fp);
+                snprintf(err, err_len, "Corrupt AIFF COMM chunk");
+                return -1;
+            }
+            std::vector<uint8_t> comm(chunk_size);
+            if (fread(comm.data(), 1, chunk_size, fp) != chunk_size) {
+                fclose(fp);
+                snprintf(err, err_len, "Failed to read AIFF COMM chunk");
+                return -1;
+            }
+
+            channels = rd_u16_be(comm.data() + 0);
+            bits_per_sample = rd_u16_be(comm.data() + 6);
+            double sr = rd_ieee_extended_be(comm.data() + 8);
+            sample_rate = sr > 1.0 ? (uint32_t)(sr + 0.5) : 0;
+            little_endian_pcm = 0;
+
+            if (is_aifc) {
+                if (chunk_size < 22) {
+                    fclose(fp);
+                    snprintf(err, err_len, "Corrupt AIFC COMM chunk");
+                    return -1;
+                }
+                const uint8_t *compression = comm.data() + 18;
+                if (memcmp(compression, "NONE", 4) == 0) {
+                    little_endian_pcm = 0;
+                } else if (memcmp(compression, "sowt", 4) == 0) {
+                    little_endian_pcm = 1;
+                } else {
+                    fclose(fp);
+                    snprintf(err, err_len, "Unsupported AIFC compression");
+                    return -1;
+                }
+            }
+
+            have_comm = 1;
+        } else if (memcmp(chdr, "SSND", 4) == 0) {
+            if (chunk_size < 8) {
+                fclose(fp);
+                snprintf(err, err_len, "Corrupt AIFF SSND chunk");
+                return -1;
+            }
+            uint8_t ssnd[8];
+            if (fread(ssnd, 1, 8, fp) != 8) {
+                fclose(fp);
+                snprintf(err, err_len, "Failed to read AIFF SSND header");
+                return -1;
+            }
+            uint32_t offset = rd_u32_be(ssnd + 0);
+            data_offset = chunk_data_pos + 8 + (long)offset;
+            if (chunk_size < 8 + offset) {
+                fclose(fp);
+                snprintf(err, err_len, "Invalid AIFF SSND offset");
+                return -1;
+            }
+            data_size = chunk_size - 8 - offset;
+            have_ssnd = 1;
+        }
+
+        long next = chunk_data_pos + (long)chunk_size + (chunk_size & 1u);
+        if (fseek(fp, next, SEEK_SET) != 0) {
+            break;
+        }
+    }
+
+    if (!have_comm || !have_ssnd) {
+        fclose(fp);
+        snprintf(err, err_len, "AIFF missing COMM/SSND chunk");
+        return -1;
+    }
+
+    if (channels < 1 || sample_rate < 1000 || bits_per_sample == 0) {
+        fclose(fp);
+        snprintf(err, err_len, "Invalid AIFF channel/layout");
+        return -1;
+    }
+    if (!(bits_per_sample == 8 || bits_per_sample == 16 || bits_per_sample == 24 || bits_per_sample == 32)) {
+        fclose(fp);
+        snprintf(err, err_len, "Unsupported AIFF format (need PCM 8/16/24/32)");
+        return -1;
+    }
+
+    int bytes_per_sample = bits_per_sample / 8;
+    int block_align = (int)channels * bytes_per_sample;
+    if (block_align < 1 || data_size < (uint32_t)block_align) {
+        fclose(fp);
+        snprintf(err, err_len, "Invalid AIFF data size");
+        return -1;
+    }
+
+    if (fseek(fp, data_offset, SEEK_SET) != 0) {
+        fclose(fp);
+        snprintf(err, err_len, "Failed to seek AIFF data");
+        return -1;
+    }
+
+    uint8_t *raw = (uint8_t *)malloc(data_size);
+    if (!raw) {
+        fclose(fp);
+        snprintf(err, err_len, "Out of memory reading AIFF");
+        return -1;
+    }
+    if (fread(raw, 1, data_size, fp) != data_size) {
+        free(raw);
+        fclose(fp);
+        snprintf(err, err_len, "Failed to read AIFF data");
+        return -1;
+    }
+    fclose(fp);
+
+    int frame_count = (int)(data_size / (uint32_t)block_align);
+    if (frame_count <= 0) {
+        free(raw);
+        snprintf(err, err_len, "Empty AIFF data");
+        return -1;
+    }
+
+    out->data = (float *)malloc((size_t)frame_count * sizeof(float));
+    if (!out->data) {
+        free(raw);
+        snprintf(err, err_len, "Out of memory allocating sample data");
+        return -1;
+    }
+
+    for (int i = 0; i < frame_count; i++) {
+        float mono = 0.0f;
+        const uint8_t *frame_ptr = raw + (size_t)i * block_align;
+
+        for (int ch = 0; ch < channels; ch++) {
+            const uint8_t *sp = frame_ptr + ch * bytes_per_sample;
+            float v = 0.0f;
+
+            if (bits_per_sample == 8) {
+                int8_t x = (int8_t)sp[0];
+                v = (float)x / 128.0f;
+            } else if (bits_per_sample == 16) {
+                int16_t x = little_endian_pcm ? (int16_t)rd_u16_le(sp) : (int16_t)rd_u16_be(sp);
+                v = (float)x / 32768.0f;
+            } else if (bits_per_sample == 24) {
+                int32_t x = little_endian_pcm ? rd_i24_le(sp) : rd_i24_be(sp);
+                v = (float)x / 8388608.0f;
+            } else {
+                int32_t x = little_endian_pcm ? (int32_t)rd_u32_le(sp) : (int32_t)rd_u32_be(sp);
+                v = (float)x / 2147483648.0f;
+            }
+
+            mono += v;
+        }
+
+        mono /= (float)channels;
+        out->data[i] = clampf(mono, -1.0f, 1.0f);
+    }
+
+    free(raw);
+    out->length = frame_count;
+    out->sample_rate = (int)sample_rate;
+    return 0;
+}
+
+static int has_extension_ci(const char *path, const char *ext) {
+    if (!path || !ext) return 0;
+    int path_len = (int)strlen(path);
+    int ext_len = (int)strlen(ext);
+    if (path_len < ext_len) return 0;
+    return strcasecmp(path + path_len - ext_len, ext) == 0;
+}
+
 static int has_wav_extension(const char *path) {
-    if (!path) return 0;
-    int len = (int)strlen(path);
-    if (len < 5) return 0;
-    const char *ext = path + len - 4;
-    return (ext[0] == '.' &&
-            (ext[1] == 'w' || ext[1] == 'W') &&
-            (ext[2] == 'a' || ext[2] == 'A') &&
-            (ext[3] == 'v' || ext[3] == 'V'));
+    return has_extension_ci(path, ".wav");
+}
+
+static int has_aiff_extension(const char *path) {
+    return has_extension_ci(path, ".aif") || has_extension_ci(path, ".aiff");
+}
+
+static int has_supported_audio_extension(const char *path) {
+    return has_wav_extension(path) || has_aiff_extension(path);
+}
+
+static int load_audio_mono(const char *path, sample_buffer_t *out, char *err, int err_len) {
+    if (has_wav_extension(path)) {
+        return load_wav_mono(path, out, err, err_len);
+    }
+    if (has_aiff_extension(path)) {
+        return load_aiff_mono(path, out, err, err_len);
+    }
+    snprintf(err, err_len, "Unsupported sample file type");
+    return -1;
 }
 
 static int json_get_number(const char *json, const char *key, float *out) {
@@ -380,30 +639,280 @@ static std::string url_decode(const std::string &src) {
     return ret;
 }
 
-static float extract_float(const std::string &block, const char *key, float default_val) {
-    char needle[128];
-    snprintf(needle, sizeof(needle), "\"%s\":", key);
-    const char *p = strstr(block.c_str(), needle);
-    if (!p) {
-        snprintf(needle, sizeof(needle), "\"%s\" :", key);
-        p = strstr(block.c_str(), needle);
+typedef enum {
+    PRESET_JSON_NULL = 0,
+    PRESET_JSON_BOOL,
+    PRESET_JSON_NUMBER,
+    PRESET_JSON_STRING,
+    PRESET_JSON_ARRAY,
+    PRESET_JSON_OBJECT,
+} preset_json_type_t;
+
+typedef struct preset_json_value {
+    preset_json_type_t type;
+    std::string string_value;
+    double number_value;
+    int bool_value;
+    std::vector<preset_json_value> array_values;
+    std::vector<std::pair<std::string, preset_json_value> > object_values;
+
+    preset_json_value() : type(PRESET_JSON_NULL), number_value(0.0), bool_value(0) {}
+} preset_json_value_t;
+
+static void preset_json_skip_ws(const std::string &src, size_t *pos) {
+    while (*pos < src.size() && isspace((unsigned char)src[*pos])) {
+        (*pos)++;
     }
-    if (!p) return default_val;
-    p = strchr(p, ':');
-    if (!p) return default_val;
-    p++;
-    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
-    return (float)atof(p);
 }
 
-/* Move's native .ablpreset (substring of .ablpresetbundle, so reject bundles). */
+static int preset_json_parse_string(const std::string &src, size_t *pos, std::string *out, std::string *err) {
+    if (*pos >= src.size() || src[*pos] != '"') {
+        *err = "Expected JSON string";
+        return -1;
+    }
+
+    (*pos)++;
+    std::string result;
+    while (*pos < src.size()) {
+        char c = src[*pos];
+        (*pos)++;
+        if (c == '"') {
+            *out = result;
+            return 0;
+        }
+        if (c != '\\') {
+            result.push_back(c);
+            continue;
+        }
+        if (*pos >= src.size()) {
+            *err = "Unterminated JSON escape";
+            return -1;
+        }
+
+        char esc = src[*pos];
+        (*pos)++;
+        switch (esc) {
+            case '"': result.push_back('"'); break;
+            case '\\': result.push_back('\\'); break;
+            case '/': result.push_back('/'); break;
+            case 'b': result.push_back('\b'); break;
+            case 'f': result.push_back('\f'); break;
+            case 'n': result.push_back('\n'); break;
+            case 'r': result.push_back('\r'); break;
+            case 't': result.push_back('\t'); break;
+            case 'u':
+                if (*pos + 4 > src.size()) {
+                    *err = "Invalid JSON unicode escape";
+                    return -1;
+                }
+                result.push_back('?');
+                *pos += 4;
+                break;
+            default:
+                *err = "Invalid JSON escape";
+                return -1;
+        }
+    }
+
+    *err = "Unterminated JSON string";
+    return -1;
+}
+
+static int preset_json_parse_value(const std::string &src, size_t *pos, preset_json_value_t *out, std::string *err);
+
+static int preset_json_parse_array(const std::string &src, size_t *pos, preset_json_value_t *out, std::string *err) {
+    if (*pos >= src.size() || src[*pos] != '[') {
+        *err = "Expected JSON array";
+        return -1;
+    }
+
+    out->type = PRESET_JSON_ARRAY;
+    out->array_values.clear();
+    (*pos)++;
+    preset_json_skip_ws(src, pos);
+    if (*pos < src.size() && src[*pos] == ']') {
+        (*pos)++;
+        return 0;
+    }
+
+    while (*pos < src.size()) {
+        preset_json_value_t item;
+        if (preset_json_parse_value(src, pos, &item, err) != 0) {
+            return -1;
+        }
+        out->array_values.push_back(item);
+        preset_json_skip_ws(src, pos);
+        if (*pos >= src.size()) break;
+        if (src[*pos] == ']') {
+            (*pos)++;
+            return 0;
+        }
+        if (src[*pos] != ',') {
+            *err = "Expected ',' or ']' in JSON array";
+            return -1;
+        }
+        (*pos)++;
+        preset_json_skip_ws(src, pos);
+    }
+
+    *err = "Unterminated JSON array";
+    return -1;
+}
+
+static int preset_json_parse_object(const std::string &src, size_t *pos, preset_json_value_t *out, std::string *err) {
+    if (*pos >= src.size() || src[*pos] != '{') {
+        *err = "Expected JSON object";
+        return -1;
+    }
+
+    out->type = PRESET_JSON_OBJECT;
+    out->object_values.clear();
+    (*pos)++;
+    preset_json_skip_ws(src, pos);
+    if (*pos < src.size() && src[*pos] == '}') {
+        (*pos)++;
+        return 0;
+    }
+
+    while (*pos < src.size()) {
+        std::string key;
+        preset_json_value_t value;
+        if (preset_json_parse_string(src, pos, &key, err) != 0) {
+            return -1;
+        }
+        preset_json_skip_ws(src, pos);
+        if (*pos >= src.size() || src[*pos] != ':') {
+            *err = "Expected ':' in JSON object";
+            return -1;
+        }
+        (*pos)++;
+        preset_json_skip_ws(src, pos);
+        if (preset_json_parse_value(src, pos, &value, err) != 0) {
+            return -1;
+        }
+        out->object_values.push_back(std::make_pair(key, value));
+        preset_json_skip_ws(src, pos);
+        if (*pos >= src.size()) break;
+        if (src[*pos] == '}') {
+            (*pos)++;
+            return 0;
+        }
+        if (src[*pos] != ',') {
+            *err = "Expected ',' or '}' in JSON object";
+            return -1;
+        }
+        (*pos)++;
+        preset_json_skip_ws(src, pos);
+    }
+
+    *err = "Unterminated JSON object";
+    return -1;
+}
+
+static int preset_json_parse_value(const std::string &src, size_t *pos, preset_json_value_t *out, std::string *err) {
+    preset_json_skip_ws(src, pos);
+    if (*pos >= src.size()) {
+        *err = "Unexpected end of JSON input";
+        return -1;
+    }
+
+    char c = src[*pos];
+    if (c == '"') {
+        out->type = PRESET_JSON_STRING;
+        return preset_json_parse_string(src, pos, &out->string_value, err);
+    }
+    if (c == '{') {
+        return preset_json_parse_object(src, pos, out, err);
+    }
+    if (c == '[') {
+        return preset_json_parse_array(src, pos, out, err);
+    }
+    if (c == 't' && src.compare(*pos, 4, "true") == 0) {
+        out->type = PRESET_JSON_BOOL;
+        out->bool_value = 1;
+        *pos += 4;
+        return 0;
+    }
+    if (c == 'f' && src.compare(*pos, 5, "false") == 0) {
+        out->type = PRESET_JSON_BOOL;
+        out->bool_value = 0;
+        *pos += 5;
+        return 0;
+    }
+    if (c == 'n' && src.compare(*pos, 4, "null") == 0) {
+        out->type = PRESET_JSON_NULL;
+        *pos += 4;
+        return 0;
+    }
+    if ((c >= '0' && c <= '9') || c == '-') {
+        char *endp = NULL;
+        out->number_value = strtod(src.c_str() + *pos, &endp);
+        if (!endp || endp == src.c_str() + *pos) {
+            *err = "Invalid JSON number";
+            return -1;
+        }
+        out->type = PRESET_JSON_NUMBER;
+        *pos = (size_t)(endp - src.c_str());
+        return 0;
+    }
+
+    *err = "Unexpected JSON token";
+    return -1;
+}
+
+static const preset_json_value_t *preset_json_object_get(const preset_json_value_t *obj, const char *key) {
+    if (!obj || obj->type != PRESET_JSON_OBJECT || !key) return NULL;
+    for (size_t i = 0; i < obj->object_values.size(); i++) {
+        if (obj->object_values[i].first == key) {
+            return &obj->object_values[i].second;
+        }
+    }
+    return NULL;
+}
+
+static const char *preset_json_get_string(const preset_json_value_t *value) {
+    if (!value || value->type != PRESET_JSON_STRING) return NULL;
+    return value->string_value.c_str();
+}
+
+static float preset_json_get_number_or_default(const preset_json_value_t *obj, const char *key, float default_val) {
+    const preset_json_value_t *value = preset_json_object_get(obj, key);
+    if (!value || value->type != PRESET_JSON_NUMBER) return default_val;
+    return (float)value->number_value;
+}
+
+static int preset_json_get_int_or_default(const preset_json_value_t *obj, const char *key, int default_val) {
+    const preset_json_value_t *value = preset_json_object_get(obj, key);
+    if (!value) return default_val;
+    if (value->type == PRESET_JSON_NULL) return default_val;
+    if (value->type != PRESET_JSON_NUMBER) return default_val;
+    return (int)value->number_value;
+}
+
+static const preset_json_value_t *preset_json_find_object_with_kind(const preset_json_value_t *value, const char *kind) {
+    if (!value || !kind) return NULL;
+
+    if (value->type == PRESET_JSON_OBJECT) {
+        const preset_json_value_t *kind_value = preset_json_object_get(value, "kind");
+        if (kind_value && kind_value->type == PRESET_JSON_STRING && kind_value->string_value == kind) {
+            return value;
+        }
+        for (size_t i = 0; i < value->object_values.size(); i++) {
+            const preset_json_value_t *found = preset_json_find_object_with_kind(&value->object_values[i].second, kind);
+            if (found) return found;
+        }
+    } else if (value->type == PRESET_JSON_ARRAY) {
+        for (size_t i = 0; i < value->array_values.size(); i++) {
+            const preset_json_value_t *found = preset_json_find_object_with_kind(&value->array_values[i], kind);
+            if (found) return found;
+        }
+    }
+
+    return NULL;
+}
+
 static int has_preset_extension(const char *path) {
-    if (!path) return 0;
-    int len = strlen(path);
-    const int n = 10; /* ".ablpreset" */
-    if (len < n) return 0;
-    if (strcasecmp(path + len - n, ".ablpreset") != 0) return 0;
-    return 1;
+    return has_extension_ci(path, ".ablpreset") || has_extension_ci(path, ".json");
 }
 
 /* Resolve a drumCell sampleUri to an on-device absolute path.
@@ -412,8 +921,15 @@ static int has_preset_extension(const char *path) {
 static std::string resolve_sample_uri(const std::string &uri, const char *preset_dir) {
     std::string decoded = url_decode(uri);
     const char *ul = "ableton:/user-library/";
+    const char *packs_core = "ableton:/packs/abl-core-library/";
     if (decoded.compare(0, strlen(ul), ul) == 0) {
         return std::string("/data/UserData/UserLibrary/") + decoded.substr(strlen(ul));
+    }
+    if (decoded.compare(0, strlen(packs_core), packs_core) == 0) {
+        return std::string("/data/CoreLibrary/") + decoded.substr(strlen(packs_core));
+    }
+    if (decoded.compare(0, 9, "ableton:/") == 0) {
+        return std::string();
     }
     if (!decoded.empty() && decoded[0] == '/') {
         return decoded;
@@ -426,6 +942,15 @@ static int set_pad_sample_path(mrdrums_instance_t *inst, int pad_index, const ch
 static int set_param_value(mrdrums_instance_t *inst, const char *key, const char *val);
 
 static int load_preset(mrdrums_instance_t *inst, const char *preset_path) {
+    if (!inst || !preset_path || !preset_path[0]) {
+        set_error(inst, "Preset path is empty");
+        return -1;
+    }
+    if (!has_preset_extension(preset_path)) {
+        set_error(inst, "Selected preset must be .ablpreset or .json");
+        return -1;
+    }
+
     /* directory the preset lives in, for resolving any relative sample URIs */
     char preset_dir[1024];
     snprintf(preset_dir, sizeof(preset_dir), "%s", preset_path);
@@ -442,144 +967,119 @@ static int load_preset(mrdrums_instance_t *inst, const char *preset_path) {
     std::string json_str = buffer.str();
     t.close();
 
-    const char *start_pos = strstr(json_str.c_str(), "\"kind\": \"drumRack\"");
-    if (!start_pos) {
-        start_pos = strstr(json_str.c_str(), "\"kind\":\"drumRack\"");
+    size_t pos = 0;
+    std::string parse_err;
+    preset_json_value_t root;
+    if (preset_json_parse_value(json_str, &pos, &root, &parse_err) != 0) {
+        set_error(inst, parse_err.c_str());
+        return -1;
     }
-    if (!start_pos) {
+    preset_json_skip_ws(json_str, &pos);
+    if (pos != json_str.size()) {
+        set_error(inst, "Unexpected trailing JSON content");
+        return -1;
+    }
+
+    const preset_json_value_t *drum_rack = preset_json_find_object_with_kind(&root, "drumRack");
+    if (!drum_rack) {
         set_error(inst, "Preset does not contain a drumRack");
         return -1;
     }
 
-    const char *chains_pos = strstr(start_pos, "\"chains\": [");
-    if (!chains_pos) {
-        chains_pos = strstr(start_pos, "\"chains\":[");
-    }
-    if (!chains_pos) {
+    const preset_json_value_t *chains = preset_json_object_get(drum_rack, "chains");
+    if (!chains || chains->type != PRESET_JSON_ARRAY) {
         set_error(inst, "drumRack missing chains");
         return -1;
     }
 
-    const char *p = strchr(chains_pos, '[');
-    if (!p) {
-        set_error(inst, "drumRack chains invalid structure");
+    std::string first_error;
+    int mapped_cells = 0;
+    for (size_t i = 0; i < chains->array_values.size(); i++) {
+        const preset_json_value_t *chain = &chains->array_values[i];
+        if (chain->type != PRESET_JSON_OBJECT) continue;
+
+        const preset_json_value_t *zone_settings = preset_json_object_get(chain, "drumZoneSettings");
+        int note = preset_json_get_int_or_default(zone_settings, "receivingNote", -1);
+        if (note < 36 || note > 51) {
+            continue;
+        }
+
+        mapped_cells++;
+        int pad_index = note - 35;
+        int choke_group = preset_json_get_int_or_default(zone_settings, "chokeGroup", 0);
+
+        const preset_json_value_t *drum_cell = preset_json_find_object_with_kind(chain, "drumCell");
+        const preset_json_value_t *device_data = preset_json_object_get(drum_cell, "deviceData");
+        const preset_json_value_t *parameters = preset_json_object_get(drum_cell, "parameters");
+
+        const char *sample_uri_str = NULL;
+        const preset_json_value_t *sample_uri = preset_json_object_get(device_data, "sampleUri");
+        if (sample_uri) {
+            sample_uri_str = preset_json_get_string(sample_uri);
+        }
+
+        char resolved_wav_path[1024] = "";
+        if (sample_uri_str && sample_uri_str[0]) {
+            std::string resolved = resolve_sample_uri(sample_uri_str, preset_dir);
+            if (resolved.empty()) {
+                set_error(inst, "Unsupported ableton:/ sample URI");
+                return -1;
+            }
+            snprintf(resolved_wav_path, sizeof(resolved_wav_path), "%s", resolved.c_str());
+        }
+
+        float db = preset_json_get_number_or_default(parameters, "Volume", -12.0f);
+        float vol = clampf(powf(10.0f, (db + 12.0f) / 20.0f), 0.0f, 2.0f);
+        float pan = preset_json_get_number_or_default(parameters, "Pan", 0.0f);
+        float tune = preset_json_get_number_or_default(parameters, "Voice_Transpose", 0.0f);
+        float start = preset_json_get_number_or_default(parameters, "Voice_PlaybackStart", 0.0f);
+        float attack_ms = preset_json_get_number_or_default(parameters, "Voice_Envelope_Attack", 0.0f) * 1000.0f;
+        float decay_ms = preset_json_get_number_or_default(parameters, "Voice_Envelope_Decay", 0.25f) * 1000.0f;
+
+        if (set_pad_sample_path(inst, pad_index, resolved_wav_path) != 0 && first_error.empty()) {
+            first_error = inst->last_error[0] ? inst->last_error : "Failed to load preset sample";
+        }
+
+        char key[64];
+        char val_str[128];
+
+        mrdrums_make_pad_key(pad_index, "vol", key, sizeof(key));
+        snprintf(val_str, sizeof(val_str), "%.6g", vol);
+        set_param_value(inst, key, val_str);
+
+        mrdrums_make_pad_key(pad_index, "pan", key, sizeof(key));
+        snprintf(val_str, sizeof(val_str), "%.6g", pan);
+        set_param_value(inst, key, val_str);
+
+        mrdrums_make_pad_key(pad_index, "tune", key, sizeof(key));
+        snprintf(val_str, sizeof(val_str), "%.6g", tune);
+        set_param_value(inst, key, val_str);
+
+        mrdrums_make_pad_key(pad_index, "start", key, sizeof(key));
+        snprintf(val_str, sizeof(val_str), "%.6g", start);
+        set_param_value(inst, key, val_str);
+
+        mrdrums_make_pad_key(pad_index, "attack_ms", key, sizeof(key));
+        snprintf(val_str, sizeof(val_str), "%.6g", attack_ms);
+        set_param_value(inst, key, val_str);
+
+        mrdrums_make_pad_key(pad_index, "decay_ms", key, sizeof(key));
+        snprintf(val_str, sizeof(val_str), "%.6g", decay_ms);
+        set_param_value(inst, key, val_str);
+
+        mrdrums_make_pad_key(pad_index, "choke_group", key, sizeof(key));
+        snprintf(val_str, sizeof(val_str), "%d", choke_group);
+        set_param_value(inst, key, val_str);
+    }
+
+    if (mapped_cells == 0) {
+        set_error(inst, "Preset contains no pads mapped to notes 36..51");
         return -1;
     }
-    p++;
-
-    int depth = 0;
-    const char *chain_start = NULL;
-
-    while (*p) {
-        if (*p == '{') {
-            if (depth == 0) {
-                chain_start = p;
-            }
-            depth++;
-        } else if (*p == '}') {
-            depth--;
-            if (depth == 0 && chain_start) {
-                std::string chain_block(chain_start, p - chain_start + 1);
-
-                int note = -1;
-                const char *note_pos = strstr(chain_block.c_str(), "\"receivingNote\":");
-                if (!note_pos) note_pos = strstr(chain_block.c_str(), "\"receivingNote\" :");
-                if (note_pos) {
-                    note = atoi(note_pos + 16);
-                }
-
-                if (note >= 36 && note <= 51) {
-                    int pad_index = note - 35;
-
-                    std::string sample_uri;
-                    const char *uri_pos = strstr(chain_block.c_str(), "\"sampleUri\":");
-                    if (!uri_pos) uri_pos = strstr(chain_block.c_str(), "\"sampleUri\" :");
-                    if (uri_pos) {
-                        const char *colon = strchr(uri_pos, ':');
-                        if (colon) {
-                            const char *quote_start = strchr(colon, '"');
-                            if (quote_start) {
-                                quote_start++;
-                                const char *quote_end = strchr(quote_start, '"');
-                                if (quote_end) {
-                                    sample_uri = std::string(quote_start, quote_end - quote_start);
-                                }
-                            }
-                        }
-                    }
-
-                    char resolved_wav_path[1024] = "";
-                    if (!sample_uri.empty()) {
-                        std::string resolved = resolve_sample_uri(sample_uri, preset_dir);
-                        snprintf(resolved_wav_path, sizeof(resolved_wav_path), "%s", resolved.c_str());
-                    }
-
-                    float db = extract_float(chain_block, "Volume", -12.0f);
-                    float vol = clampf(powf(10.0f, (db + 12.0f) / 20.0f), 0.0f, 2.0f);
-                    float pan = extract_float(chain_block, "Pan", 0.0f);
-                    float tune = extract_float(chain_block, "Voice_Transpose", 0.0f);
-                    float start = extract_float(chain_block, "Voice_PlaybackStart", 0.0f);
-                    float attack_sec = extract_float(chain_block, "Voice_Envelope_Attack", 0.0f);
-                    float attack_ms = attack_sec * 1000.0f;
-                    float decay_sec = extract_float(chain_block, "Voice_Envelope_Decay", 0.25f);
-                    float decay_ms = decay_sec * 1000.0f;
-
-                    int choke_group = 0;
-                    const char *choke_pos = strstr(chain_block.c_str(), "\"chokeGroup\":");
-                    if (!choke_pos) choke_pos = strstr(chain_block.c_str(), "\"chokeGroup\" :");
-                    if (choke_pos) {
-                        const char *col = strchr(choke_pos, ':');
-                        if (col) {
-                            col++;
-                            while (*col == ' ' || *col == '\t') col++;
-                            if (strncmp(col, "null", 4) != 0) {
-                                choke_group = atoi(col);
-                            }
-                        }
-                    }
-
-                    set_pad_sample_path(inst, pad_index, resolved_wav_path);
-
-                    char key[64];
-                    char val_str[128];
-
-                    mrdrums_make_pad_key(pad_index, "vol", key, sizeof(key));
-                    snprintf(val_str, sizeof(val_str), "%.6g", vol);
-                    set_param_value(inst, key, val_str);
-
-                    mrdrums_make_pad_key(pad_index, "pan", key, sizeof(key));
-                    snprintf(val_str, sizeof(val_str), "%.6g", pan);
-                    set_param_value(inst, key, val_str);
-
-                    mrdrums_make_pad_key(pad_index, "tune", key, sizeof(key));
-                    snprintf(val_str, sizeof(val_str), "%.6g", tune);
-                    set_param_value(inst, key, val_str);
-
-                    mrdrums_make_pad_key(pad_index, "start", key, sizeof(key));
-                    snprintf(val_str, sizeof(val_str), "%.6g", start);
-                    set_param_value(inst, key, val_str);
-
-                    mrdrums_make_pad_key(pad_index, "attack_ms", key, sizeof(key));
-                    snprintf(val_str, sizeof(val_str), "%.6g", attack_ms);
-                    set_param_value(inst, key, val_str);
-
-                    mrdrums_make_pad_key(pad_index, "decay_ms", key, sizeof(key));
-                    snprintf(val_str, sizeof(val_str), "%.6g", decay_ms);
-                    set_param_value(inst, key, val_str);
-
-                    mrdrums_make_pad_key(pad_index, "choke_group", key, sizeof(key));
-                    snprintf(val_str, sizeof(val_str), "%d", choke_group);
-                    set_param_value(inst, key, val_str);
-                }
-
-                chain_start = NULL;
-            }
-        } else if (*p == ']' && depth == 0) {
-            break;
-        }
-        p++;
+    if (!first_error.empty()) {
+        set_error(inst, first_error.c_str());
+        return -1;
     }
-
     set_error(inst, NULL);
     return 0;
 }
@@ -603,13 +1103,13 @@ static int set_pad_sample_path(mrdrums_instance_t *inst, int pad_index, const ch
         return 0;
     }
 
-    if (has_wav_extension(path)) {
+    if (has_supported_audio_extension(path)) {
         snprintf(inst->ui_last_sample_dir, sizeof(inst->ui_last_sample_dir), "%s", path);
     }
 
-    if (!has_wav_extension(path)) {
+    if (!has_supported_audio_extension(path)) {
         clear_pad_sample(inst, pad_index);
-        set_error(inst, "Selected file must be .wav");
+        set_error(inst, "Selected file must be .wav, .aif, or .aiff");
         return -1;
     }
 
@@ -622,7 +1122,7 @@ static int set_pad_sample_path(mrdrums_instance_t *inst, int pad_index, const ch
 
     sample_buffer_t loaded;
     char err[256];
-    if (load_wav_mono(resolved, &loaded, err, sizeof(err)) != 0) {
+    if (load_audio_mono(resolved, &loaded, err, sizeof(err)) != 0) {
         clear_pad_sample(inst, pad_index);
         set_error(inst, err);
         return -1;
