@@ -57,13 +57,17 @@ int main() {
         api->destroy_instance(inst);
         return fail("pad_sample_path label should not use Current prefix");
     }
-    if (!std::strstr(chain_params, "\"root\":\"/data/UserData/UserLibrary/Samples\"")) {
+    if (!std::strstr(chain_params, "\"root\":\"/data\"")) {
         api->destroy_instance(inst);
-        return fail("filepath root not set to /data/UserData/UserLibrary/Samples");
+        return fail("filepath root not set to /data");
     }
     if (!std::strstr(chain_params, "\"start_path\":\"/data/UserData/UserLibrary/Samples\"")) {
         api->destroy_instance(inst);
         return fail("filepath start_path metadata missing");
+    }
+    if (!std::strstr(chain_params, "\"filter\":[\".wav\",\".aif\",\".aiff\"]")) {
+        api->destroy_instance(inst);
+        return fail("filepath filter missing wav/aif/aiff support");
     }
     if (!std::strstr(chain_params, "\"live_preview\":true")) {
         api->destroy_instance(inst);
@@ -72,6 +76,14 @@ int main() {
     if (!std::strstr(chain_params, "\"browser_hooks\":{\"on_open\":[{\"key\":\"ui_auto_select_pad\",\"value\":\"off\",\"restore\":true}]}")) {
         api->destroy_instance(inst);
         return fail("filepath browser_hooks metadata missing");
+    }
+    if (!std::strstr(chain_params, "\"key\":\"ui_preset_path\"")) {
+        api->destroy_instance(inst);
+        return fail("ui_preset_path metadata missing");
+    }
+    if (!std::strstr(chain_params, "\"key\":\"ui_preset_path\",\"name\":\"Load Preset\",\"type\":\"filepath\",\"root\":\"/data\",\"start_path\":\"/data/UserData/UserLibrary/Track Presets\",\"filter\":[\".ablpreset\",\".json\"]")) {
+        api->destroy_instance(inst);
+        return fail("ui_preset_path metadata missing /data root, expected start path, or json filter");
     }
 
     api->set_param(inst, "ui_last_sample_dir", "/data/UserData/UserLibrary/Samples/Drums/Kicks/Kick07.wav");

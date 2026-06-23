@@ -13,10 +13,11 @@ static const mrdrums_param_desc_t kGlobalParams[] = {
     {"ui_auto_select_pad", "Auto Select", "enum", NULL, 0, 0.0f, 0.0f, 0.0f, 0.0f, "on", "[\"off\",\"on\"]", NULL, NULL, NULL},
     {"ui_current_pad", "Current Pad", "int", NULL, 0, 1.0f, 16.0f, 1.0f, 1.0f, NULL, NULL, NULL, NULL, NULL},
     {"ui_pad_page", "Pad Page", "enum", NULL, 0, 0.0f, 0.0f, 0.0f, 0.0f, "main", "[\"main\",\"random\"]", NULL, NULL, NULL},
+    {"ui_preset_path", "Load Preset", "filepath", NULL, 0, 0.0f, 0.0f, 0.0f, 0.0f, "", NULL, "/data", "[\".ablpreset\",\".json\"]", "/data/UserData/UserLibrary/Track Presets"},
 };
 
 static const mrdrums_pad_field_desc_t kPadFields[] = {
-    {"sample_path", "Sample", "filepath", 0.0f, 0.0f, 0.0f, 0.0f, "", NULL, "/data/UserData/UserLibrary/Samples", ".wav", "/data/UserData/UserLibrary/Samples"},
+    {"sample_path", "Sample", "filepath", 0.0f, 0.0f, 0.0f, 0.0f, "", NULL, "/data", "[\".wav\",\".aif\",\".aiff\"]", "/data/UserData/UserLibrary/Samples"},
     {"vol", "Vol", "float", 0.0f, 2.0f, 0.01f, 1.0f, NULL, NULL, NULL, NULL, NULL},
     {"pan", "Pan", "float", -1.0f, 1.0f, 0.1f, 0.0f, NULL, NULL, NULL, NULL, NULL},
     {"tune", "Tune", "float", -24.0f, 24.0f, 1.0f, 0.0f, NULL, NULL, NULL, NULL, NULL},
