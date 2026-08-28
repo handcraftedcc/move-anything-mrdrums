@@ -1896,7 +1896,7 @@ static int build_ui_hierarchy(mrdrums_instance_t *inst, char *buf, int buf_len) 
                         "\"ui_current_pad\":\"ui_current_pad\""
                     "},"
                     "\"params\":[\"ui_current_pad\",\"sample_path\",\"vol\",\"pan\",\"tune\",\"start\",\"attack_ms\",\"decay_ms\",\"choke_group\",\"mode\",\"rand_pan_amt\",\"rand_vol_amt\",\"rand_decay_amt\",\"chance_pct\"],"
-                    "\"knobs\":[\"ui_current_pad\",\"sample_path\",\"rand_pan_amt\",\"rand_vol_amt\",\"rand_decay_amt\",\"chance_pct\"]"
+                    "\"knobs\":[\"sample_path\",\"rand_pan_amt\",\"rand_vol_amt\",\"rand_decay_amt\",\"chance_pct\"]"
                 "}"
             "}"
         "}"
