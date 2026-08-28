@@ -1840,24 +1840,63 @@ static int build_ui_hierarchy(mrdrums_instance_t *inst, char *buf, int buf_len) 
         (size_t)buf_len,
         "{"
             "\"levels\":{"
+                /*
+                 * ROOT IS A CHILD LEVEL: its knobs are the FOCUSED PAD.
+                 *
+                 * It listed `pad_*` aliases, which we resolve internally to
+                 * ui_current_pad. That works for reading and writing and fails
+                 * for anything keyed on the parameter NAME -- above all
+                 * modulation. An LFO on a pad start is stored against
+                 * `p01_start`, so the host asked `pad_start:modulated`, got 0,
+                 * and the cell showed no tilde, no base and no live value.
+                 *
+                 * child_index_param keeps auto-select-pad alive: the host
+                 * follows ui_current_pad rather than owning the index itself.
+                 * The overrides are PASSTHROUGHS -- a template naming no
+                 * {index}/{key} resolves to itself -- for the two GLOBAL keys.
+                 */
                 "\"root\":{"
                     "\"name\":\"MrDrums\","
+                    "\"child_count\":16,"
+                    "\"child_label\":\"Pad\","
+                    "\"child_key_template\":\"p{index}_{key}\","
+                    "\"child_index_base\":1,"
+                    "\"child_index_digits\":2,"
+                    "\"child_index_param\":\"ui_current_pad\","
+                    "\"child_key_overrides\":{"
+                        "\"ui_preset_path\":\"ui_preset_path\""
+                    "},"
                     "\"params\":["
-                        "{\"label\":\"Global\",\"level\":\"global\"},"
+                        /* Pad Settings first, then Global, then presets: the
+                         * page order follows this list, and the pad pages are
+                         * what you are actually working in. */
                         "{\"label\":\"Pad Settings\",\"level\":\"pad_settings\"},"
+                        "{\"label\":\"Global\",\"level\":\"global\"},"
                         "\"ui_preset_path\""
                     "],"
-                    "\"knobs\":[\"ui_auto_select_pad\",\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\"]"
+                    "\"knobs\":[\"vol\",\"pan\",\"tune\",\"start\",\"attack_ms\",\"decay_ms\",\"choke_group\",\"mode\"]"
                 "},"
                 "\"global\":{"
                     "\"name\":\"Global\","
-                    "\"params\":[\"g_master_vol\",\"g_polyphony\",\"g_vel_curve\",\"g_humanize_ms\",\"g_rand_seed\",\"g_rand_loop_steps\"],"
-                    "\"knobs\":[\"g_master_vol\",\"g_polyphony\",\"g_vel_curve\",\"g_humanize_ms\",\"g_rand_seed\",\"g_rand_loop_steps\"]"
+                    "\"params\":[\"ui_auto_select_pad\",\"g_master_vol\",\"g_polyphony\",\"g_vel_curve\",\"g_humanize_ms\",\"g_rand_seed\",\"g_rand_loop_steps\"],"
+                    "\"knobs\":[\"ui_auto_select_pad\",\"g_master_vol\",\"g_polyphony\",\"g_vel_curve\",\"g_humanize_ms\",\"g_rand_seed\",\"g_rand_loop_steps\"]"
                 "},"
+                /* Same treatment: left on aliases this page kept the ORIGINAL
+                 * fault -- correct waveform, no tilde, rotation-rate updates.
+                 * Both levels name ui_current_pad, so they share one focus. */
                 "\"pad_settings\":{"
                     "\"name\":\"Pad Settings\","
-                    "\"params\":[\"ui_auto_select_pad\",\"ui_current_pad\",\"pad_sample_path\",\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\",\"pad_rand_pan_amt\",\"pad_rand_vol_amt\",\"pad_rand_decay_amt\",\"pad_chance_pct\"],"
-                    "\"knobs\":[\"ui_auto_select_pad\",\"pad_vol\",\"pad_pan\",\"pad_tune\",\"pad_start\",\"pad_attack_ms\",\"pad_decay_ms\",\"pad_choke_group\",\"pad_mode\"]"
+                    "\"child_count\":16,"
+                    "\"child_label\":\"Pad\","
+                    "\"child_key_template\":\"p{index}_{key}\","
+                    "\"child_index_base\":1,"
+                    "\"child_index_digits\":2,"
+                    "\"child_index_param\":\"ui_current_pad\","
+                    "\"child_key_overrides\":{"
+                        "\"ui_current_pad\":\"ui_current_pad\""
+                    "},"
+                    "\"params\":[\"ui_current_pad\",\"sample_path\",\"vol\",\"pan\",\"tune\",\"start\",\"attack_ms\",\"decay_ms\",\"choke_group\",\"mode\",\"rand_pan_amt\",\"rand_vol_amt\",\"rand_decay_amt\",\"chance_pct\"],"
+                    "\"knobs\":[\"sample_path\",\"rand_pan_amt\",\"rand_vol_amt\",\"rand_decay_amt\",\"chance_pct\"]"
                 "}"
             "}"
         "}"
