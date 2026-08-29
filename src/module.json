@@ -243,12 +243,17 @@
             { "label": "Global", "level": "global" },
             { "label": "Pad Settings", "level": "pad_settings" },
             "ui_preset_path"
-          ],
+          ,
+            { "key": "ui_auto_select_pad", "short_name": "Auto" }],
           "knobs": ["ui_auto_select_pad", "pad_vol", "pad_pan", "pad_tune", "pad_start", "pad_attack_ms", "pad_decay_ms", "pad_choke_group", "pad_mode"]
         },
         "global": {
           "name": "Global",
-          "params": ["g_master_vol", "g_polyphony", "g_vel_curve", "g_humanize_ms", "g_rand_seed", "g_rand_loop_steps"],
+          "params": ["g_master_vol", "g_polyphony", "g_vel_curve", "g_humanize_ms", "g_rand_seed", "g_rand_loop_steps",
+        { "key": "g_master_vol", "short_name": "Vol" },
+        { "key": "g_vel_curve", "short_name": "Curve" },
+        { "key": "g_rand_seed", "short_name": "Seed" },
+        { "key": "g_rand_loop_steps", "short_name": "Steps" }],
           "knobs": ["g_master_vol", "g_polyphony", "g_vel_curve", "g_humanize_ms", "g_rand_seed", "g_rand_loop_steps"]
         },
         "pad_settings": {
@@ -282,7 +287,8 @@
             { "key": "pad_rand_vol_amt", "visible_if": { "param": "ui_pad_page", "equals": "random" } },
             { "key": "pad_rand_decay_amt", "visible_if": { "param": "ui_pad_page", "equals": "random" } },
             { "key": "pad_chance_pct", "visible_if": { "param": "ui_pad_page", "equals": "random" } }
-          ],
+          ,
+            { "key": "ui_auto_select_pad", "short_name": "Auto" }],
           "knobs": ["ui_auto_select_pad", "ui_current_pad", "ui_pad_page", "pad_vol", "pad_pan", "pad_tune", "pad_start", "pad_attack_ms", "pad_decay_ms", "pad_choke_group", "pad_mode", "pad_rand_pan_amt", "pad_rand_vol_amt", "pad_rand_decay_amt", "pad_chance_pct"]
         }
       }
